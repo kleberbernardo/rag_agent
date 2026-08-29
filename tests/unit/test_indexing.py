@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from langchain_core.documents import Document
 
-from rag_agent.ingest import load_documents, split_documents
+from rag_agent.indexing import load_documents, split_documents
 
 
 class TestLoadDocuments:

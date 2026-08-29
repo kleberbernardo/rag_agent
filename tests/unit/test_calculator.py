@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from rag_agent.tools import calcular
+from rag_agent.tools import calculate
 
 
 def evaluate(expression: str) -> str:
     """Invoke the tool the way the agent would."""
-    return calcular.invoke({"expressao": expression})
+    return calculate.invoke({"expression": expression})
 
 
 class TestArithmetic:

@@ -251,6 +251,7 @@ rag-agent/
 │
 ├── src/rag_agent/         código-fonte
 │   ├── config.py          configuração central, validada no boot
+│   ├── types.py           tipos de domínio (AnswerResult, SearchHit, ToolCall)
 │   ├── providers/         clientes de LLM e embeddings (isola a OpenAI)
 │   ├── prompts/           instruções permanentes do agente
 │   ├── indexing/          carregar, quebrar e indexar documentos
