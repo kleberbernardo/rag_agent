@@ -7,13 +7,31 @@ a scheduled job or a bot a thin wrapper instead of a rewrite.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from rag_agent.agent.builder import build_agent
+from rag_agent.prompts import SYSTEM_PROMPT
+from rag_agent.providers import build_chat_model
+from rag_agent.tools import TOOLS
 from rag_agent.types import AnswerResult, ToolCall
 
 logger = logging.getLogger(__name__)
+
+
+def build_agent() -> Any:
+    """Build the compiled agent graph, ready to invoke.
+
+    A plain RAG pipeline always retrieves once and then answers. This graph
+    lets the model decide whether to search, search again with different
+    terms, or reach for a different tool entirely.
+    """
+    return create_agent(
+        model=build_chat_model(),
+        tools=TOOLS,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
 
 def ask(question: str) -> AnswerResult:

@@ -16,8 +16,8 @@ from rich.panel import Panel
 from rag_agent.agent import ChatSession, ask, format_trace
 from rag_agent.config import get_settings
 from rag_agent.indexing import count_documents, index_documents, load_documents, split_documents
+from rag_agent.logging_setup import setup_logging
 from rag_agent.types import AnswerResult
-from rag_agent.utils import setup_logging
 
 app = typer.Typer(add_completion=False, help="Assistente RAG sobre a documentação do Nimbus.")
 console = Console()
