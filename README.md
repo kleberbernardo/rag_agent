@@ -20,31 +20,82 @@ says so instead of inventing one.
 
 Requires Python 3.12+ and an OpenAI API key.
 
-```bash
+**1. Create the virtual environment and activate it**
+
+```powershell
+# Windows (PowerShell)
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-# Windows
-.venv\Scripts\Activate.ps1
+```bash
 # Linux / macOS
+python -m venv .venv
 source .venv/bin/activate
+```
 
+Your prompt now starts with `(.venv)`. That is how you know it worked.
+
+**2. Install the project**
+
+```bash
 pip install -e ".[dev]"
+```
 
+The `-e` flag means code changes take effect immediately, and the install
+registers the `rag` command.
+
+**3. Set your API key**
+
+```bash
 cp .env.example .env        # Windows: copy .env.example .env
 ```
 
-Then put your API key in `.env`:
+Then edit `.env`:
 
 ```
 OPENAI_API_KEY=sk-...
 ```
 
-Installing with `-e` means code changes take effect immediately, and it
-registers the `rag` command. Without installing, use `python main.py` instead.
+---
+
+## Running the commands
+
+> **The `rag` command only exists while the virtual environment is active.**
+> Activation lasts for that terminal window only — open a new one and you have
+> to activate again. This is the single most common reason `rag` "does not
+> work".
+
+Every session starts like this:
+
+```powershell
+.\.venv\Scripts\Activate.ps1     # Windows — source .venv/bin/activate elsewhere
+$env:PYTHONIOENCODING='utf-8'    # Windows only, keeps accented output intact
+```
+
+`rag: command not found` (or `The term 'rag' is not recognized`) always means
+the environment is not active. Two ways out:
+
+```powershell
+.\.venv\Scripts\Activate.ps1     # activate, then use `rag ...`
+.\.venv\Scripts\rag.exe chat     # or call the executable directly, no activation
+```
+
+If PowerShell refuses to run the activation script with *"running scripts is
+disabled on this system"*, allow it once for your user:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Never installed the package at all? `python main.py chat` works from the
+project root without the `rag` command.
 
 ---
 
 ## Usage
+
+All commands below assume the environment is active.
 
 ### 1. Add your documents
 
@@ -98,8 +149,18 @@ and delegated the multiplication.
 rag chat
 ```
 
-Keeps context between turns, so follow-up questions work. Exit with `sair`,
-`exit` or `Ctrl+C`.
+Keeps context between turns, so follow-up questions work without repeating the
+subject. Exit with `sair`, `exit` or `Ctrl+C`.
+
+```
+você > what does the Growth plan cost?
+agente > R$ 890 per month. (fonte: produto.md)
+
+você > and the cheaper one?          ← no need to name it again
+agente > The Starter plan is R$ 290 per month. (fonte: produto.md)
+
+você > sair
+```
 
 ### Diagnostics
 
@@ -253,10 +314,14 @@ an HTTP API or a bot means wrapping that service, not rewriting it.
 
 ## Development
 
+With the environment active:
+
 ```bash
 pytest                          # full suite
-pytest -m "not integration"     # fast tests only, no network
+pytest -v                       # one line per test
+pytest -m "not integration"     # fast tests only, no network, no API cost
 pytest --cov=rag_agent          # with coverage
+pytest -k calculator            # filter by name
 
 ruff check . && ruff format .   # lint and format
 mypy                            # type check
@@ -272,6 +337,9 @@ service loop with a fake model — and need no API key. Tests marked
 
 | Symptom | Fix |
 |---|---|
+| `rag` not recognized / command not found | The virtual environment is not active. Run `.\.venv\Scripts\Activate.ps1`, or call `.\.venv\Scripts\rag.exe` directly. |
+| `running scripts is disabled on this system` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, once. |
+| `pytest` not recognized | Same cause — activate the environment first. |
 | `O índice está vazio` | Run `rag ingest` |
 | `Pasta de dados não encontrada` | Check `DATA_DIR` with `rag status` |
 | OpenAI authentication error | Check `OPENAI_API_KEY` in `.env` |
