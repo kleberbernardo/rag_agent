@@ -33,6 +33,7 @@ from rag_agent.indexing import (
     describe_location,
     index_documents,
     load_documents,
+    reset_index,
     split_documents,
 )
 from rag_agent.logging_setup import setup_logging
@@ -53,13 +54,24 @@ TraceOption = typer.Option(False, "--trace", "-t", help="Mostra o raciocínio do
 DatasetOption = typer.Option(DEFAULT_DATASET, "--dataset", "-d", help="Arquivo do dataset.")
 LimitOption = typer.Option(0, "--limit", "-n", help="Roda apenas os N primeiros casos.")
 SaveOption = typer.Option(True, "--save/--no-save", help="Grava o relatório em evals/results.")
+HostOption = typer.Option("127.0.0.1", "--host", help="Endereço de escuta.")
+PortOption = typer.Option(8080, "--port", "-p", help="Porta.")
+ReloadOption = typer.Option(False, "--reload", help="Reinicia ao salvar arquivo (desenvolvimento).")
+ResetOption = typer.Option(
+    False, "--reset", help="Apaga o índice antes de indexar. Use ao trocar de estratégia."
+)
 
 
 @app.command()
-def ingest(verbose: bool = VerboseOption) -> None:
+def ingest(reset: bool = ResetOption, verbose: bool = VerboseOption) -> None:
     """Lê os documentos de data/, quebra em pedaços e indexa no banco vetorial."""
     setup_logging(verbose=verbose)
     settings = get_settings()
+
+    if reset:
+        with console.status("[cyan]Limpando o índice..."):
+            reset_index()
+        console.print("[green]OK[/] índice limpo")
 
     with console.status("[cyan]Carregando documentos..."):
         documents = load_documents(settings.data_dir)
@@ -235,6 +247,24 @@ def _render_report(report: EvalReport) -> None:
         ):
             if value is False:
                 console.print(f"  [red]falhou em {label}")
+
+
+@app.command()
+def serve(
+    host: str = HostOption,
+    port: int = PortOption,
+    reload: bool = ReloadOption,
+    verbose: bool = VerboseOption,
+) -> None:
+    """Sobe a API HTTP. Documentação interativa em /docs."""
+    setup_logging(verbose=verbose)
+
+    import uvicorn
+
+    console.print(f"[green]API em[/] http://{host}:{port}  ·  docs em http://{host}:{port}/docs")
+    # Passed as an import string rather than the object, because --reload needs
+    # to re-import the module in a fresh process.
+    uvicorn.run("rag_agent.api.app:app", host=host, port=port, reload=reload)
 
 
 def _require_index() -> None:

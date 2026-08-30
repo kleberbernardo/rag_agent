@@ -8,6 +8,7 @@ from rag_agent.indexing.vector_store import (
     describe_location,
     get_vector_store,
     index_documents,
+    reset_index,
     search,
 )
 
@@ -19,6 +20,7 @@ __all__ = [
     "get_vector_store",
     "index_documents",
     "load_documents",
+    "reset_index",
     "search",
     "split_documents",
 ]

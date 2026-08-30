@@ -63,6 +63,19 @@ def count_documents() -> int:
     return len(get_vector_store().get(include=[])["ids"])
 
 
+def reset_index() -> None:
+    """Drop every indexed chunk.
+
+    Ingestion is idempotent for identical chunks, but changing the chunking
+    strategy produces different text and therefore different ids. Without a
+    way to clear the collection, the old chunks stay behind and compete for
+    retrieval against the new ones.
+    """
+    store = get_vector_store()
+    store.delete_collection()
+    logger.info("Cleared the index at %s", describe_location())
+
+
 def describe_location() -> str:
     """Where the index lives, for diagnostics and log messages."""
     settings = get_settings()

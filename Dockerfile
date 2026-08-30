@@ -42,6 +42,11 @@ RUN mkdir -p /app/.chroma /app/logs && chown -R rag:rag /app
 
 USER rag
 
-# The image is the CLI: `docker compose run --rm rag ask "..."`.
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"
+
+# The image serves the API by default. The CLI is still one word away:
+#   docker compose run --rm api ask "..."
 ENTRYPOINT ["rag"]
-CMD ["status"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]

@@ -23,6 +23,8 @@ says so instead of inventing one.
   the folder, change one variable, re-ingest.
 - **Evaluated**: 29 graded questions, including ones the corpus cannot answer.
   Currently 97%.
+- **Two interfaces**: a CLI and an HTTP API over the same service layer, both
+  in one container.
 
 ---
 
@@ -390,6 +392,7 @@ src/rag_agent/
 ├── indexing/          loader · splitter · vector_store
 ├── tools/             one module per tool, registered in build_tools()
 ├── agent/             service (build + orchestration) · trace
+├── api/               FastAPI wrapper: routes · schemas · sessions
 └── evaluation/        dataset · metrics · runner
 ```
 
@@ -405,9 +408,89 @@ Everything else is a single module.
 | Chunking or retrieval | `.env` |
 | The model provider | `providers.py` |
 | Token prices | `pricing.py` |
+| Add an endpoint | `api/routes.py` |
 
 Interfaces stay thin because orchestration lives in `agent/service.py`. Adding
 an HTTP API or a bot means wrapping that service, not rewriting it.
+
+---
+
+## HTTP API
+
+The same agent behind an HTTP interface. The endpoints call `agent.service`,
+the same orchestration the CLI calls, so this layer translates requests and
+results and holds no logic of its own.
+
+```bash
+rag serve                          # http://127.0.0.1:8080
+rag serve --host 0.0.0.0 --port 80
+rag serve --reload                 # development
+```
+
+Interactive documentation, generated from the schemas, at `/docs`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/ask` | One question, no memory |
+| `POST` | `/chat` | A question inside a conversation |
+| `DELETE` | `/chat/{session_id}` | Forget a conversation |
+| `GET` | `/health` | Liveness plus the indexed chunk count |
+| `GET` | `/status` | The active configuration |
+
+```bash
+curl -X POST localhost:8080/ask   -H "Content-Type: application/json"   -d '{"question": "qual o percentual maximo do lote suplementar?"}'
+```
+
+```json
+{
+  "answer": "O percentual máximo do lote suplementar não pode ultrapassar 15%...",
+  "sources": ["cvm-resolucao-160-ofertas-publicas.pdf"],
+  "tools_used": [{"name": "search_documentation", "arguments": {...}}],
+  "metrics": {
+    "latency_seconds": 9.05,
+    "total_tokens": 2949,
+    "tool_calls": 1,
+    "model": "gpt-4o-mini",
+    "estimated_cost_usd": 0.00047
+  },
+  "session_id": null,
+  "trace": null
+}
+```
+
+Every answer carries what it cost, the same numbers the CLI prints. Add
+`"trace": true` to the body to get the reasoning trail as well.
+
+### Conversations
+
+`POST /chat` without a `session_id` opens one and returns its id. Send that id
+back to continue:
+
+```bash
+curl -X POST localhost:8080/chat -H "Content-Type: application/json"   -d '{"question": "o que caracteriza uma informação relevante?"}'
+# -> {"session_id": "97c93e1d...", ...}
+
+curl -X POST localhost:8080/chat -H "Content-Type: application/json"   -d '{"question": "e quem deve divulgar?", "session_id": "97c93e1d..."}'
+```
+
+**Sessions live in the process that served them.** A second replica would not
+see them, and a restart forgets everything. The store caps at 100 conversations
+and evicts the oldest, because each one holds its whole message history and an
+unbounded dictionary is a memory leak with a friendly name. Making sessions
+survive means Redis or a database, which is a decision to take when there is a
+second replica, not before.
+
+### Failure modes
+
+| Situation | Response |
+|---|---|
+| Empty index | `503` naming the ingestion step |
+| Chroma unreachable | `503` naming the address it tried |
+| Malformed body | `422` from the schema |
+| Unknown session on delete | `404` |
+
+An unknown `session_id` on `POST /chat` opens a new conversation rather than
+failing: a client holding an id from before a restart should keep working.
 
 ---
 
@@ -420,20 +503,28 @@ with its own volume, and survives the application entirely.
 ```bash
 export OPENAI_API_KEY=sk-...        # Windows: $env:OPENAI_API_KEY='sk-...'
 
-docker compose up -d chroma         # start the vector store
-docker compose run --rm rag ingest  # build the index
-docker compose run --rm rag ask "quem deve divulgar informação relevante?"
+docker compose up -d                     # Chroma, then the API
+docker compose run --rm api ingest       # build the index
+curl localhost:8080/health
 ```
 
-`docker compose up` starts only Chroma. The agent is a one-shot command, not a
-daemon, so it runs through `docker compose run` and exits, which is
-why it sits behind a `cli` profile instead of starting on its own.
+`docker compose up` brings up both services. The API waits for Chroma to report
+healthy before starting, and has a healthcheck of its own hitting `/health`.
+
+The image serves the API by default and still runs the CLI on demand, because
+the entrypoint is the `rag` command itself:
+
+```bash
+docker compose run --rm api ask "qual o prazo de suspensão de uma oferta?"
+docker compose run --rm api eval
+docker compose run --rm api ingest --reset
+```
 
 The index survives restarts:
 
 ```bash
 docker compose restart chroma
-docker compose run --rm rag status   # still 687 chunks
+docker compose run --rm api status   # still 590 chunks
 ```
 
 `./data` is mounted read-only, so swapping the corpus needs no rebuild. To
