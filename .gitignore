@@ -38,3 +38,6 @@ htmlcov/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Crash dumps do Git Bash no Windows
+*.stackdump
