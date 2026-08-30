@@ -11,17 +11,17 @@ language. The agent retrieves the relevant passages before answering and cites
 the file it took each answer from. When the answer is not in your documents, it
 says so instead of inventing one.
 
-- **Grounded** — answers come from retrieved passages, never from model memory.
-- **Cited** — every answer names its source file.
-- **Agentic** — the model decides when to search, can search again with
+- **Grounded**: answers come from retrieved passages, never from model memory.
+- **Cited**: every answer names its source file.
+- **Agentic**: the model decides when to search, can search again with
   different terms, and can reach for other tools.
-- **Local index** — the vector store is an embedded database on disk. No server
+- **Local index**: the vector store is an embedded database on disk. No server
   to run, or point it at a standalone Chroma with one variable.
-- **Measured** — every answer reports its latency, token usage and estimated
+- **Measured**: every answer reports its latency, token usage and estimated
   cost, with optional full tracing to Langfuse.
-- **Domain-agnostic** — the subject lives in configuration, not in code. Swap
+- **Domain-agnostic**: the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
-- **Evaluated** — 29 graded questions, including ones the corpus cannot answer.
+- **Evaluated**: 29 graded questions, including ones the corpus cannot answer.
   Currently 97%.
 
 ---
@@ -72,14 +72,14 @@ OPENAI_API_KEY=sk-...
 ## Running the commands
 
 > **The `rag` command only exists while the virtual environment is active.**
-> Activation lasts for that terminal window only — open a new one and you have
+> Activation lasts for that terminal window only. Open a new one and you have
 > to activate again. This is the single most common reason `rag` "does not
 > work".
 
 Every session starts like this:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1     # Windows — source .venv/bin/activate elsewhere
+.\.venv\Scripts\Activate.ps1     # Windows; source .venv/bin/activate elsewhere
 $env:PYTHONIOENCODING='utf-8'    # Windows only, keeps accented output intact
 ```
 
@@ -113,7 +113,7 @@ Drop files into `data/`. Supported: `.md`, `.txt`, `.markdown`, `.rst` and
 `.pdf`. Subfolders are scanned recursively; anything else is skipped.
 
 The repository ships with a real corpus so you can try it immediately: three
-consolidated resolutions from the CVM, the Brazilian securities regulator —
+consolidated resolutions from the CVM, the Brazilian securities regulator.
 204 pages covering suitability, disclosure of material information and public
 offerings. Provenance is recorded in `docs/knowledge-base-sources.md`.
 
@@ -128,7 +128,7 @@ rag ingest --verbose
 ```
 
 Run this once, and again whenever the documents change. Ingestion is
-idempotent — running it twice updates the same records instead of duplicating
+idempotent: running it twice updates the same records instead of duplicating
 them.
 
 ### 3. Ask
@@ -163,11 +163,11 @@ ferramentas usadas: search_documentation, calculate
 
 Every answer closes with what it cost: wall-clock latency, tokens split
 between input and output, how many tools ran, and an estimated price. It is
-measured locally from the provider's own usage reporting — no account, no
-external service. A model with no listed price shows no estimate rather than a
+measured locally from the provider's own usage reporting, with no account and
+no external service. A model with no listed price shows no estimate rather than a
 confident wrong number.
 
-The agent did not do the arithmetic itself — it delegated the multiplication
+The agent did not do the arithmetic itself. It delegated the multiplication
 to the calculator, and cited the page it took the limit from.
 
 Citations reach the article, not just the file, because article-based chunking
@@ -192,7 +192,7 @@ ferramentas usadas: search_documentation
 
 That single article carries five different deadlines across its paragraphs.
 Cutting every 1000 characters used to separate them, and the agent answered
-with the neighbouring one — which is what `CHUNK_STRATEGY=articles` fixed.
+with the neighbouring one. `CHUNK_STRATEGY=articles` fixed that.
 
 ### 4. Or hold a conversation
 
@@ -232,15 +232,15 @@ whenever something looks wrong.
 ## Configuration
 
 Everything lives in `.env`. Copy `.env.example` and edit. Values are validated
-at boot — an invalid setting stops the program immediately with a clear message
-rather than failing mid-query.
+at boot, so an invalid setting stops the program immediately with a clear
+message rather than failing mid-query.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENAI_API_KEY` | — | **Required.** |
+| `OPENAI_API_KEY` | none | **Required.** |
 | `CHAT_MODEL` | `gpt-4o-mini` | Model that reasons and picks tools. |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model that turns text into vectors. |
-| `TEMPERATURE` | `0.0` | `0` is deterministic — what you want for grounded answers. |
+| `TEMPERATURE` | `0.0` | `0` is deterministic, the right setting for grounded answers. |
 | `CHUNK_STRATEGY` | `articles` | `articles` gives each `Art. N` its own chunk; `characters` cuts by length. |
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
@@ -253,8 +253,8 @@ rather than failing mid-query.
 | `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written in embedded mode. |
 | `CHROMA_HOST` / `CHROMA_PORT` | `localhost` / `8000` | The Chroma server address, used in server mode. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
-| `LANGFUSE_PUBLIC_KEY` | — | Optional. Enables tracing when set together with the secret key. |
-| `LANGFUSE_SECRET_KEY` | — | Optional. See [Observability](#observability). |
+| `LANGFUSE_PUBLIC_KEY` | none | Optional. Enables tracing when set together with the secret key. |
+| `LANGFUSE_SECRET_KEY` | none | Optional. See [Observability](#observability). |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse region, e.g. `https://us.cloud.langfuse.com`. |
 
 ---
@@ -263,18 +263,18 @@ rather than failing mid-query.
 
 The system has two phases that never run at the same time.
 
-### Phase 1 — Ingestion (offline)
+### Phase 1: ingestion (offline)
 
 ```
 data/*  ──▶  load  ──▶  split  ──▶  embed  ──▶  .chroma/
           (loader)   (splitter)  (providers)  (vector_store)
 ```
 
-**Load** — each file becomes a `Document` carrying its filename as metadata.
+**Load**. Each file becomes a `Document` carrying its filename as metadata.
 That metadata is what lets the final answer cite a source. PDFs become one
 document per page, so a citation can point at a page number.
 
-**Split** — two strategies, chosen by `CHUNK_STRATEGY`.
+**Split**. Two strategies, chosen by `CHUNK_STRATEGY`.
 
 `characters` cuts every `CHUNK_SIZE` characters, breaking at paragraph
 boundaries first, then lines, sentences and words. Chunks overlap by
@@ -283,7 +283,7 @@ in at least one of them.
 
 `articles` gives each `Art. N` its own chunk. Legal and regulatory texts are
 already divided by their author, and cutting every 1000 characters separates a
-rule from the exception that qualifies it — the shipped corpus has one article
+rule from the exception that qualifies it. The shipped corpus has one article
 carrying five different deadlines across its paragraphs. Only a capitalised
 `Art.` opens an article; lowercase `art. 36` is a cross-reference inside a
 sentence, and this corpus has 138 of those against 106 real headings.
@@ -291,31 +291,31 @@ sentence, and this corpus has 138 of those against 106 real headings.
 It is adaptive: a source with fewer than three headings falls back to
 characters, so a plain README in the folder is unharmed. PDF pages are joined
 before splitting, because an article routinely spans a page break. Articles
-over `ARTICLE_MAX_CHARS` are split further — annexes carry no headings, and one
-arrived as a single 148,000-character block.
+over `ARTICLE_MAX_CHARS` are split further, because annexes carry no headings
+and one arrived as a single 148,000-character block.
 
 Measured on the shipped corpus: **93% by characters, 97% by articles.**
 
-**Embed** — each chunk is sent to the embedding model and comes back as a
+**Embed**. Each chunk is sent to the embedding model and comes back as a
 vector: a list of numbers positioning that text in semantic space. Chunks that
 mean similar things land near each other.
 
-**Store** — vectors are written to Chroma. Each chunk gets an id derived from
-a hash of its source and content, which is what makes re-ingestion overwrite
-rather than duplicate.
+**Store**. Vectors are written to Chroma. Each chunk gets an id derived from
+a hash of its source and content, so re-ingestion overwrites instead of
+duplicating.
 
 The store runs in one of two modes, chosen by `VECTOR_STORE_MODE`:
 
 | Mode | What it is | When |
 |---|---|---|
-| `embedded` | A local file. Nothing to run. | Default — clone and try it |
+| `embedded` | A local file. Nothing to run. | Default: clone and try it |
 | `server` | A standalone Chroma over HTTP | Storage that restarts and scales apart from the app |
 
 Both expose the same interface, so switching is a configuration change. In
 server mode an unreachable Chroma fails with an actionable message instead of
 a driver stack trace.
 
-### Phase 2 — Query (online)
+### Phase 2: query (online)
 
 ```
 question ──▶ agent decides ──▶ runs a tool ──▶ reads the result
@@ -329,7 +329,7 @@ question ──▶ agent decides ──▶ runs a tool ──▶ reads the resul
 The question is embedded by the **same model** used during ingestion, and the
 store returns the nearest chunks. This is why "what does the cheapest tier
 cost" finds the right passage even when neither "cheapest" nor "tier" appears
-in the text — matching happens on meaning, not on words.
+in the text. Matching happens on meaning, not on words.
 
 > Change `EMBEDDING_MODEL` and you must delete `.chroma/` and re-ingest.
 > Vectors from different models are not comparable.
@@ -352,11 +352,11 @@ It ends when the model stops calling tools and writes prose.
 ### Tools
 
 A tool is a plain Python function the model may call. The model never sees the
-body — only the name, the signature and the docstring. **The docstring is the
+body, only the name, the signature and the docstring. **The docstring is the
 contract**: it is how the model decides when the tool applies.
 
-- `search_documentation` — semantic search over the indexed chunks.
-- `calculate` — a safe arithmetic evaluator. Language models are unreliable at
+- `search_documentation`: semantic search over the indexed chunks.
+- `calculate`: a safe arithmetic evaluator. Language models are unreliable at
   arithmetic, so anything numeric is delegated here. Expressions are parsed
   into a syntax tree and checked against an allow-list, so a model-authored
   string can never become arbitrary code execution.
@@ -381,7 +381,7 @@ that file is how you change how the agent behaves.
 src/rag_agent/
 ├── config.py          settings, read from the environment and validated at boot
 ├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
-├── providers.py       LLM and embedding clients — the only place OpenAI appears
+├── providers.py       LLM and embedding clients, the only place OpenAI appears
 ├── prompts.py         the agent's permanent instructions, rendered per domain
 ├── pricing.py         token prices, used to estimate what a run cost
 ├── observability.py   optional Langfuse tracing, inert without keys
@@ -414,7 +414,7 @@ an HTTP API or a bot means wrapping that service, not rewriting it.
 ## Running with Docker
 
 Two services: the agent and a standalone Chroma. This is what
-`VECTOR_STORE_MODE=server` exists for — the index lives in its own container,
+`VECTOR_STORE_MODE=server` exists for. The index lives in its own container,
 with its own volume, and survives the application entirely.
 
 ```bash
@@ -426,8 +426,8 @@ docker compose run --rm rag ask "quem deve divulgar informação relevante?"
 ```
 
 `docker compose up` starts only Chroma. The agent is a one-shot command, not a
-daemon, so it runs through `docker compose run` and exits — which is why it
-sits behind a `cli` profile instead of starting on its own.
+daemon, so it runs through `docker compose run` and exits, which is
+why it sits behind a `cli` profile instead of starting on its own.
 
 The index survives restarts:
 
@@ -445,8 +445,8 @@ docker compose down -v
 
 **On image size:** the runtime image is ~618 MB. Most of that is `chromadb`
 pulling in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust bindings
-(57 MB) — machinery for running Chroma as a server, which this container never
-does. Swapping to the thin `chromadb-client` would cut roughly 200 MB, at the
+(57 MB), all of it machinery for running Chroma as a server, which this
+container never does. Swapping to the thin `chromadb-client` would cut roughly 200 MB, at the
 cost of an image that can no longer run in embedded mode. Not worth the hidden
 constraint for the saving.
 
@@ -456,8 +456,9 @@ constraint for the saving.
 
 Every answer already reports its own cost locally. That tells you the total;
 it does not tell you where the time and the tokens went. For that, the agent
-can emit a full trace to [Langfuse](https://langfuse.com) — one row per model
-call, tool call and retrieval, each with its own latency, tokens and price.
+can emit a full trace to [Langfuse](https://langfuse.com), with one row per
+model call, tool call and retrieval, each carrying its own latency, tokens and
+price.
 
 ```
 rag.ask                                    3.78s   1634 tok   $0.00031
@@ -468,7 +469,7 @@ rag.ask                                    3.78s   1634 tok   $0.00031
      └─ final answer
 ```
 
-Turn it on by setting both keys — a free account at
+Turn it on by setting both keys. A free account at
 [cloud.langfuse.com](https://cloud.langfuse.com) is enough:
 
 ```
@@ -478,13 +479,13 @@ LANGFUSE_HOST=https://cloud.langfuse.com     # or https://us.cloud.langfuse.com
 ```
 
 Leave them out and nothing is sent, nothing is imported, and the agent behaves
-identically. Tracing that can take the application down with it is worse than
-no tracing, so a rejected key or an unreachable Langfuse logs a warning and
-disables itself rather than failing the answer.
+identically. Observability must never break the thing it observes, so a rejected key or an
+unreachable Langfuse logs a warning and disables itself instead of failing the
+answer.
 
 Each `rag chat` conversation gets a session id, so its turns group together in
 the dashboard instead of appearing as unrelated runs. Traces carry the model,
-the embedding model, the knowledge domain and `retrieval_k` as metadata — a
+the embedding model, the knowledge domain and `retrieval_k` as metadata, so a
 trace from last month still explains which configuration produced it.
 
 **Why it matters here:** the agent sometimes emits its tool calls in parallel,
@@ -532,13 +533,13 @@ relatório salvo em evals/results/20260830-202941.json
 `recusa` reads `n/a` here because none of the first five cases is an
 out-of-corpus one: zero of zero applicable is not the same as failing.
 
-The whole suite, all 29 cases, currently scores **97%** — one failure, described
-below.
+The whole suite, all 29 cases, currently scores **97%**, with the single
+failure described below.
 
 Failures print with the answer, the documents retrieved and which metric broke,
 and the command exits non-zero so it can gate a release. Reports land in
-`evals/results/` stamped with the model, the embedding model and `retrieval_k`
-— a score without its configuration cannot be compared to the next run.
+`evals/results/` stamped with the model, the embedding model and `retrieval_k`.
+A score without its configuration cannot be compared to the next run.
 
 ### The dataset
 
@@ -552,13 +553,13 @@ Every fact was extracted from the indexed PDFs, not written from memory.
 ### Every metric is deterministic
 
 No second model grades the answers. A language model used as a judge drifts
-between runs, and a suite you cannot trust is worse than none. The four metrics
+between runs, and a suite you cannot trust has no value. The four metrics
 are string and set operations: same answer, same score, no extra cost.
 
 The trade-off is honest: `retrieval` checks that the right *document* came
 back, not the right *passage*. In a 143-page regulation full of near-identical
-deadlines, that is a coarse instrument — which is exactly what the failures
-below exposed.
+deadlines, that is a coarse instrument, and the failures below exposed exactly
+that.
 
 ### What it found
 
@@ -566,10 +567,10 @@ Running it for the first time paid for itself immediately:
 
 | Finding | Fix | Result |
 |---|---|---|
-| Right document, wrong deadline — 5 cases where the answer cited the correct file with the wrong number | `RETRIEVAL_K` 4 → 8 | 82% → 86% |
+| Right document, wrong deadline: 5 cases where the answer cited the correct file with the wrong number | `RETRIEVAL_K` 4 → 8 | 82% → 86% |
 | The agent never stopped searching for an answer that was not there, until the context window overflowed and killed the whole run | A rule capping retries, plus `recursion_limit` on the graph | 86% → 93% |
 | One failing case aborted the entire suite | Per-case error isolation in the runner | The other 27 results survive |
-| A question so ambiguous the agent was graded wrong for a correct answer — the article carries five different deadlines for "exigências" | Split into two specific questions | The dataset got honest |
+| A question so ambiguous the agent was graded wrong for a correct answer, since the article carries five different deadlines for "exigências" | Split into two specific questions | The dataset got honest |
 | Rules separated from the exceptions that qualify them, because chunking cut every 1000 characters | `CHUNK_STRATEGY=articles` | 93% → 97% |
 
 The first is the dangerous one: a wrong number with a correct citation looks
@@ -602,8 +603,8 @@ Actions (`.github/workflows/ci.yml`). Integration tests are excluded there: a
 public repository has no business holding an API key, and every push would
 spend tokens.
 
-Unit tests cover the pure logic — chunking, the calculator, settings, the
-service loop with a fake model — and need no API key. Tests marked
+Unit tests cover the pure logic (chunking, the calculator, settings, the
+service loop with a fake model) and need no API key. Tests marked
 `integration` hit the real embedding API and are skipped without one.
 
 ---
@@ -614,7 +615,7 @@ service loop with a fake model — and need no API key. Tests marked
 |---|---|
 | `rag` not recognized / command not found | The virtual environment is not active. Run `.\.venv\Scripts\Activate.ps1`, or call `.\.venv\Scripts\rag.exe` directly. |
 | `running scripts is disabled on this system` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, once. |
-| `pytest` not recognized | Same cause — activate the environment first. |
+| `pytest` not recognized | Same cause. Activate the environment first. |
 | `O índice está vazio` | Run `rag ingest` |
 | `Pasta de dados não encontrada` | Check `DATA_DIR` with `rag status` |
 | OpenAI authentication error | Check `OPENAI_API_KEY` in `.env` |
