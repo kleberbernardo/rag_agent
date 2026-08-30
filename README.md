@@ -344,6 +344,47 @@ an HTTP API or a bot means wrapping that service, not rewriting it.
 
 ---
 
+## Running with Docker
+
+Two services: the agent and a standalone Chroma. This is what
+`VECTOR_STORE_MODE=server` exists for — the index lives in its own container,
+with its own volume, and survives the application entirely.
+
+```bash
+export OPENAI_API_KEY=sk-...        # Windows: $env:OPENAI_API_KEY='sk-...'
+
+docker compose up -d chroma         # start the vector store
+docker compose run --rm rag ingest  # build the index
+docker compose run --rm rag ask "quem deve divulgar informação relevante?"
+```
+
+`docker compose up` starts only Chroma. The agent is a one-shot command, not a
+daemon, so it runs through `docker compose run` and exits — which is why it
+sits behind a `cli` profile instead of starting on its own.
+
+The index survives restarts:
+
+```bash
+docker compose restart chroma
+docker compose run --rm rag status   # still 687 chunks
+```
+
+`./data` is mounted read-only, so swapping the corpus needs no rebuild. To
+tear everything down including the index:
+
+```bash
+docker compose down -v
+```
+
+**On image size:** the runtime image is ~618 MB. Most of that is `chromadb`
+pulling in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust bindings
+(57 MB) — machinery for running Chroma as a server, which this container never
+does. Swapping to the thin `chromadb-client` would cut roughly 200 MB, at the
+cost of an image that can no longer run in embedded mode. Not worth the hidden
+constraint for the saving.
+
+---
+
 ## Development
 
 With the environment active:

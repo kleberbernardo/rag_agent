@@ -49,3 +49,25 @@ jobs:
       # push would cost tokens.
       - name: Tests
         run: pytest -m "not integration" --cov=rag_agent --cov-report=term-missing
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Building the image on every push is what keeps the Dockerfile honest:
+      # a dependency or a path that only works on the author's machine shows
+      # up here instead of in front of whoever tries to run the project.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: rag-agent:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: docker run --rm --entrypoint rag rag-agent:ci --help

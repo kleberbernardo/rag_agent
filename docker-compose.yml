@@ -1,0 +1,54 @@
+services:
+  # Standalone vector store. Running it as its own service is the point of
+  # VECTOR_STORE_MODE=server: the index survives, restarts and scales
+  # independently of the application container.
+  chroma:
+    image: chromadb/chroma:1.5.9
+    container_name: rag-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/data
+    healthcheck:
+      # The image ships neither curl nor wget, so the probe is bash opening a
+      # socket. It asks the real endpoint rather than only checking the port,
+      # because an open port does not mean the API is answering yet.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/localhost/8000 &&
+          printf 'GET /api/v2/heartbeat HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q nanosecond <&3
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  rag:
+    build: .
+    image: rag-agent:local
+    container_name: rag-agent
+    depends_on:
+      chroma:
+        # Without service_healthy the CLI would start before Chroma answers
+        # and fail on the first command.
+        condition: service_healthy
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?defina OPENAI_API_KEY no ambiente ou num arquivo .env}
+      KNOWLEDGE_DOMAIN: ${KNOWLEDGE_DOMAIN:-regulação do mercado de capitais brasileiro (resoluções da CVM)}
+      VECTOR_STORE_MODE: server
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    volumes:
+      # Read-only: the corpus is an input. Swapping documents needs no rebuild.
+      - ./data:/app/data:ro
+    # The service is a CLI, not a daemon: it runs a command and exits.
+    # `docker compose run --rm rag ask "..."` is the intended entry.
+    profiles:
+      - cli
+
+volumes:
+  chroma-data:

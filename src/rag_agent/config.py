@@ -20,11 +20,17 @@ class VectorStoreMode(StrEnum):
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file until the directory holding the project marker."""
+    """Walk up from this file until the directory holding the project marker.
+
+    Installed non-editable -- inside a container, for instance -- the package
+    sits in site-packages with no project above it. Falling back to the
+    working directory keeps the defaults somewhere the caller can reason
+    about, instead of a path inside the interpreter's own tree.
+    """
     for candidate in Path(__file__).resolve().parents:
         if (candidate / _ROOT_MARKER).is_file():
             return candidate
-    return Path(__file__).resolve().parents[2]
+    return Path.cwd()
 
 
 PROJECT_ROOT = _find_project_root()
