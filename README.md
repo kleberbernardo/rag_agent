@@ -16,7 +16,7 @@ says so instead of inventing one.
 - **Agentic** — the model decides when to search, can search again with
   different terms, and can reach for other tools.
 - **Local index** — the vector store is an embedded database on disk. No server
-  to run.
+  to run, or point it at a standalone Chroma with one variable.
 - **Domain-agnostic** — the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
 
@@ -208,7 +208,9 @@ rather than failing mid-query.
 | `RETRIEVAL_K` | `4` | Passages retrieved per question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
-| `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written. |
+| `VECTOR_STORE_MODE` | `embedded` | `embedded` for a local file, `server` for a standalone Chroma. |
+| `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written in embedded mode. |
+| `CHROMA_HOST` / `CHROMA_PORT` | `localhost` / `8000` | The Chroma server address, used in server mode. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
 
 ---
@@ -237,9 +239,20 @@ survives whole in at least one of them.
 vector: a list of numbers positioning that text in semantic space. Chunks that
 mean similar things land near each other.
 
-**Store** — vectors are written to an embedded Chroma database on disk. Each
-chunk gets an id derived from a hash of its source and content, which is what
-makes re-ingestion overwrite rather than duplicate.
+**Store** — vectors are written to Chroma. Each chunk gets an id derived from
+a hash of its source and content, which is what makes re-ingestion overwrite
+rather than duplicate.
+
+The store runs in one of two modes, chosen by `VECTOR_STORE_MODE`:
+
+| Mode | What it is | When |
+|---|---|---|
+| `embedded` | A local file. Nothing to run. | Default — clone and try it |
+| `server` | A standalone Chroma over HTTP | Storage that restarts and scales apart from the app |
+
+Both expose the same interface, so switching is a configuration change. In
+server mode an unreachable Chroma fails with an actionable message instead of
+a driver stack trace.
 
 ### Phase 2 — Query (online)
 

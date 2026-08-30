@@ -15,7 +15,14 @@ from rich.panel import Panel
 
 from rag_agent.agent import ChatSession, ask, format_trace
 from rag_agent.config import get_settings
-from rag_agent.indexing import count_documents, index_documents, load_documents, split_documents
+from rag_agent.indexing import (
+    VectorStoreUnavailableError,
+    count_documents,
+    describe_location,
+    index_documents,
+    load_documents,
+    split_documents,
+)
 from rag_agent.logging_setup import setup_logging
 from rag_agent.types import AnswerResult
 
@@ -57,7 +64,7 @@ def ingest(verbose: bool = VerboseOption) -> None:
     with console.status("[cyan]Gerando embeddings e indexando..."):
         total = index_documents(chunks)
 
-    console.print(f"[green]OK[/] {total} pedaço(s) indexado(s) em {settings.vector_store_dir}")
+    console.print(f"[green]OK[/] {total} pedaço(s) indexado(s) em {describe_location()}")
 
 
 @app.command(name="ask")
@@ -115,22 +122,33 @@ def chat(trace: bool = TraceOption, verbose: bool = VerboseOption) -> None:
 def status() -> None:
     """Mostra a configuração ativa e quantos pedaços estão indexados."""
     settings = get_settings()
-    total = count_documents()
+    total = _count_or_exit()
 
     console.print(f"[bold]modelo      [/] {settings.chat_model}")
     console.print(f"[bold]embeddings  [/] {settings.embedding_model}")
     console.print(f"[bold]chunk       [/] {settings.chunk_size} / overlap {settings.chunk_overlap}")
     console.print(f"[bold]domínio     [/] {settings.knowledge_domain}")
     console.print(f"[bold]documentos  [/] {settings.data_dir}")
-    console.print(f"[bold]índice      [/] {settings.vector_store_dir}")
+    console.print(
+        f"[bold]índice      [/] {settings.vector_store_mode.value} · {describe_location()}"
+    )
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
 
 
 def _require_index() -> None:
     """Stop early when there is nothing to search: the answer would be useless."""
-    if count_documents() == 0:
+    if _count_or_exit() == 0:
         console.print(_EMPTY_INDEX_HINT)
         raise typer.Exit(code=1)
+
+
+def _count_or_exit() -> int:
+    """Count indexed chunks, turning an unreachable server into a clean exit."""
+    try:
+        return count_documents()
+    except VectorStoreUnavailableError as error:
+        console.print(f"[red]{error}")
+        raise typer.Exit(code=1) from error
 
 
 def _read_question() -> str | None:

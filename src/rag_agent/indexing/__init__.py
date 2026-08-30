@@ -3,7 +3,9 @@
 from rag_agent.indexing.loader import SUPPORTED_SUFFIXES, load_documents
 from rag_agent.indexing.splitter import split_documents
 from rag_agent.indexing.vector_store import (
+    VectorStoreUnavailableError,
     count_documents,
+    describe_location,
     get_vector_store,
     index_documents,
     search,
@@ -11,7 +13,9 @@ from rag_agent.indexing.vector_store import (
 
 __all__ = [
     "SUPPORTED_SUFFIXES",
+    "VectorStoreUnavailableError",
     "count_documents",
+    "describe_location",
     "get_vector_store",
     "index_documents",
     "load_documents",
