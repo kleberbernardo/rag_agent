@@ -9,13 +9,21 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolated_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Keep the developer's own environment from leaking into the tests.
 
-    Also clears the settings singleton cache: without it, the first test to
-    call get_settings() would freeze its values for every test after it.
+    Three separate leaks are closed here:
+
+    * the environment variables themselves;
+    * the .env file, which pydantic-settings reads from the working directory
+      regardless of what the environment says -- so the tests run somewhere
+      that has none;
+    * the settings singleton cache, which would otherwise let the first test
+      to call get_settings() freeze its values for every test after it.
     """
     from rag_agent.config import get_settings
+
+    monkeypatch.chdir(tmp_path)
 
     for variable in (
         "OPENAI_API_KEY",

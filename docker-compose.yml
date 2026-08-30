@@ -42,6 +42,10 @@ services:
       VECTOR_STORE_MODE: server
       CHROMA_HOST: chroma
       CHROMA_PORT: "8000"
+      # Optional. Compose reads these from your .env; empty means no tracing.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
     volumes:
       # Read-only: the corpus is an input. Swapping documents needs no rebuild.
       - ./data:/app/data:ro

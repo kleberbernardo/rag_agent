@@ -2,18 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
 from rag_agent.config import Settings
-
-
-@pytest.fixture(autouse=True)
-def _no_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Run outside the project root so a local .env cannot interfere."""
-    monkeypatch.chdir(tmp_path)
 
 
 def test_defaults_are_production_ready() -> None:

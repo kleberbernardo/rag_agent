@@ -9,11 +9,13 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from rag_agent.config import get_settings
+from rag_agent.observability import build_run_config
 from rag_agent.pricing import estimate_cost_usd
 from rag_agent.prompts import build_system_prompt
 from rag_agent.providers import build_chat_model
@@ -52,6 +54,8 @@ class ChatSession:
     def __init__(self) -> None:
         self._agent = build_agent()
         self._messages: list[BaseMessage] = []
+        # Groups every turn of this conversation under one session in tracing.
+        self._session_id = uuid4().hex
 
     @property
     def messages(self) -> list[BaseMessage]:
@@ -65,7 +69,10 @@ class ChatSession:
         turn_start = len(self._messages)
 
         started = time.perf_counter()
-        state = self._agent.invoke({"messages": self._messages})
+        state = self._agent.invoke(
+            {"messages": self._messages},
+            config=build_run_config(session_id=self._session_id),
+        )
         elapsed = time.perf_counter() - started
 
         self._messages = state["messages"]

@@ -28,7 +28,7 @@ class MeteredAgent:
         self.per_turn = per_turn
         self.turn = 0
 
-    def invoke(self, state: dict[str, Any]) -> dict[str, Any]:
+    def invoke(self, state: dict[str, Any], **_: Any) -> dict[str, Any]:
         produced = self.per_turn[min(self.turn, len(self.per_turn) - 1)]
         self.turn += 1
         return {"messages": list(state["messages"]) + list(produced)}

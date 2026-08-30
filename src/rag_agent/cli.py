@@ -24,6 +24,7 @@ from rag_agent.indexing import (
     split_documents,
 )
 from rag_agent.logging_setup import setup_logging
+from rag_agent.observability import flush as flush_traces
 from rag_agent.types import AnswerResult, RunMetrics
 
 app = typer.Typer(
@@ -81,6 +82,7 @@ def ask_command(
         result = ask(question)
 
     _render(result, show_trace=trace)
+    flush_traces()
 
 
 @app.command()
@@ -108,6 +110,7 @@ def chat(trace: bool = TraceOption, verbose: bool = VerboseOption) -> None:
             continue
         if question.lower() in _EXIT_WORDS:
             console.print("[dim]até mais.")
+            flush_traces()
             break
 
         with console.status("[cyan]pensando..."):

@@ -18,7 +18,7 @@ says so instead of inventing one.
 - **Local index** — the vector store is an embedded database on disk. No server
   to run, or point it at a standalone Chroma with one variable.
 - **Measured** — every answer reports its latency, token usage and estimated
-  cost.
+  cost, with optional full tracing to Langfuse.
 - **Domain-agnostic** — the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
 
@@ -392,6 +392,49 @@ pulling in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust bindings
 does. Swapping to the thin `chromadb-client` would cut roughly 200 MB, at the
 cost of an image that can no longer run in embedded mode. Not worth the hidden
 constraint for the saving.
+
+---
+
+## Observability
+
+Every answer already reports its own cost locally. That tells you the total;
+it does not tell you where the time and the tokens went. For that, the agent
+can emit a full trace to [Langfuse](https://langfuse.com) — one row per model
+call, tool call and retrieval, each with its own latency, tokens and price.
+
+```
+rag.ask                                    3.78s   1634 tok   $0.00031
+├─ ChatOpenAI                              1.71s    411 tok
+│    └─ decided: search_documentation
+├─ tool: search_documentation              0.54s
+└─ ChatOpenAI                              1.52s   1223 tok
+     └─ final answer
+```
+
+Turn it on by setting both keys — a free account at
+[cloud.langfuse.com](https://cloud.langfuse.com) is enough:
+
+```
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com     # or https://us.cloud.langfuse.com
+```
+
+Leave them out and nothing is sent, nothing is imported, and the agent behaves
+identically. Tracing that can take the application down with it is worse than
+no tracing, so a rejected key or an unreachable Langfuse logs a warning and
+disables itself rather than failing the answer.
+
+Each `rag chat` conversation gets a session id, so its turns group together in
+the dashboard instead of appearing as unrelated runs. Traces carry the model,
+the embedding model, the knowledge domain and `retrieval_k` as metadata — a
+trace from last month still explains which configuration produced it.
+
+**Why it matters here:** the agent sometimes emits its tool calls in parallel,
+deciding to `calculate` before it has read the retrieved passage. The answer
+can still come out right while the number came from the model's memory rather
+than from the document. In the terminal that is easy to miss. In a trace, the
+two calls hanging off the same model call make it obvious.
 
 ---
 

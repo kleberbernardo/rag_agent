@@ -19,7 +19,7 @@ class FakeAgent:
         self.tool_calls = tool_calls or []
         self.invocations: list[list[BaseMessage]] = []
 
-    def invoke(self, state: dict[str, Any]) -> dict[str, Any]:
+    def invoke(self, state: dict[str, Any], **_: Any) -> dict[str, Any]:
         incoming = list(state["messages"])
         self.invocations.append(incoming)
 
