@@ -170,6 +170,30 @@ confident wrong number.
 The agent did not do the arithmetic itself — it delegated the multiplication
 to the calculator, and cited the page it took the limit from.
 
+Citations reach the article, not just the file, because article-based chunking
+records which `Art. N` each passage came from:
+
+```
+$ rag ask "qual o prazo para atendimento das primeiras exigências?"
+
+╭─ resposta ─────────────────────────────────────────────────────────╮
+│ O prazo para o atendimento das primeiras exigências é de 40        │
+│ (quarenta) dias úteis, contados a partir da emissão de ofício com  │
+│ as exigências ao requerente. Esse prazo pode ser prorrogado uma    │
+│ única vez, por um período não superior a 20 (vinte) dias úteis,    │
+│ mediante pedido fundamentado. Após o cumprimento das exigências,   │
+│ a SRE tem 10 (dez) dias úteis para se manifestar sobre o pedido    │
+│ de registro.                                                       │
+│ (fonte: cvm-resolucao-160-ofertas-publicas.pdf, Art. 38)           │
+╰────────────────────────────────────────────────────────────────────╯
+ferramentas usadas: search_documentation
+4.88s · 4115 tokens (3974 in / 141 out) · 1 tool call(s) · ~US$ 0.00068
+```
+
+That single article carries five different deadlines across its paragraphs.
+Cutting every 1000 characters used to separate them, and the agent answered
+with the neighbouring one — which is what `CHUNK_STRATEGY=articles` fixed.
+
 ### 4. Or hold a conversation
 
 ```bash
@@ -485,18 +509,31 @@ rag eval --dataset my.json  # your own questions
 ```
 
 ```
+$ rag eval --limit 5
+  PASS lote-suplementar
+  PASS lote-adicional
+  PASS prazo-analise-sre
+  PASS prazo-suficiencia
+  PASS prazo-exigencias-primeiras
                            avaliação
-┌───────────┬───────────┬─────────────────────────────────────┐
-│ métrica   │ resultado │ o que mede                          │
-├───────────┼───────────┼─────────────────────────────────────┤
+┏━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ métrica   ┃ resultado ┃ o que mede                          ┃
+┡━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ retrieval │      100% │ trouxe o documento certo            │
 │ citação   │      100% │ citou a fonte certa                 │
-│ fato      │       96% │ o número ou termo esperado apareceu │
-│ recusa    │      100% │ admitiu não saber, fora do corpus   │
-│ geral     │       97% │ passou em tudo que se aplicava      │
+│ fato      │      100% │ o número ou termo esperado apareceu │
+│ recusa    │       n/a │ admitiu não saber, fora do corpus   │
+│ geral     │      100% │ passou em tudo que se aplicava      │
 └───────────┴───────────┴─────────────────────────────────────┘
-gpt-4o-mini · k=8 · articles · mediana 2.48s · ~US$ 0.023
+gpt-4o-mini · k=8 · mediana 2.28s · 13728 tokens · ~US$ 0.0023
+relatório salvo em evals/results/20260830-202941.json
 ```
+
+`recusa` reads `n/a` here because none of the first five cases is an
+out-of-corpus one: zero of zero applicable is not the same as failing.
+
+The whole suite, all 29 cases, currently scores **97%** — one failure, described
+below.
 
 Failures print with the answer, the documents retrieved and which metric broke,
 and the command exits non-zero so it can gate a release. Reports land in
