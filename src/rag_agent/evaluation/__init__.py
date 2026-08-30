@@ -11,6 +11,7 @@ from rag_agent.evaluation.metrics import (
     CaseScore,
     error_score,
     extract_retrieved_sources,
+    groundedness,
     is_refusal,
     score_case,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "build_report",
     "error_score",
     "extract_retrieved_sources",
+    "groundedness",
     "is_refusal",
     "load_dataset",
     "run_evaluation",

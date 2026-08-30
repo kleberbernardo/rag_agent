@@ -54,6 +54,13 @@ TraceOption = typer.Option(False, "--trace", "-t", help="Mostra o raciocínio do
 DatasetOption = typer.Option(DEFAULT_DATASET, "--dataset", "-d", help="Arquivo do dataset.")
 LimitOption = typer.Option(0, "--limit", "-n", help="Roda apenas os N primeiros casos.")
 SaveOption = typer.Option(True, "--save/--no-save", help="Grava o relatório em evals/results.")
+MinScoreOption = typer.Option(
+    1.0,
+    "--min-score",
+    min=0.0,
+    max=1.0,
+    help="Nota geral mínima para o comando sair com sucesso. 1.0 exige tudo.",
+)
 HostOption = typer.Option("127.0.0.1", "--host", help="Endereço de escuta.")
 PortOption = typer.Option(8080, "--port", "-p", help="Porta.")
 ReloadOption = typer.Option(False, "--reload", help="Reinicia ao salvar arquivo (desenvolvimento).")
@@ -177,6 +184,7 @@ def eval_command(
     dataset: Path = DatasetOption,
     limit: int = LimitOption,
     save: bool = SaveOption,
+    min_score: float = MinScoreOption,
     verbose: bool = VerboseOption,
 ) -> None:
     """Mede o agente contra perguntas cuja resposta é conhecida."""
@@ -203,8 +211,11 @@ def eval_command(
         path = save_report(report, PROJECT_ROOT / "evals" / "results")
         console.print(f"[dim]relatório salvo em {path}")
 
-    # Non-zero exit makes the suite usable as a gate in CI or a pre-release check.
-    if report.failures:
+    # A threshold rather than "every case must pass": one known failure should
+    # not block a release, while a real regression should.
+    overall = report.overall.ratio or 0.0
+    if overall < min_score:
+        console.print(f"\n[red]abaixo do limiar:[/] {overall:.0%} < {min_score:.0%}")
         raise typer.Exit(code=1)
 
 
@@ -219,6 +230,7 @@ def _render_report(report: EvalReport) -> None:
     table.add_row("citação", report.citation_accuracy.percent, "citou a fonte certa")
     table.add_row("fato", report.factual_accuracy.percent, "o número ou termo esperado apareceu")
     table.add_row("recusa", report.refusal_accuracy.percent, "admitiu não saber, fora do corpus")
+    table.add_row("fundamentação", report.groundedness.percent, "todo número saiu do que ele leu")
     table.add_row("geral", report.overall.percent, "passou em tudo que se aplicava")
     console.print(table)
 
@@ -244,9 +256,14 @@ def _render_report(report: EvalReport) -> None:
             ("citação", score.citation_correct),
             ("fato", score.facts_present),
             ("recusa", score.refusal_correct),
+            ("fundamentação", score.grounded),
         ):
             if value is False:
                 console.print(f"  [red]falhou em {label}")
+        if score.ungrounded_numbers:
+            console.print(
+                f"  [red]números sem apoio na fonte:[/] {', '.join(score.ungrounded_numbers)}"
+            )
 
 
 @app.command()

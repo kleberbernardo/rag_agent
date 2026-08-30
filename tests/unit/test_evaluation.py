@@ -13,6 +13,7 @@ from rag_agent.evaluation import (
     build_report,
     error_score,
     extract_retrieved_sources,
+    groundedness,
     is_refusal,
     load_dataset,
     run_evaluation,
@@ -31,7 +32,12 @@ def answer(text: str, sources: list[str] | None = None) -> AnswerResult:
     for source in sources or []:
         messages.append(
             ToolMessage(
-                content=f"--- Trecho 1 [fonte: {source} | distância 0.512]\nconteúdo",
+                # The passage states the number the answers below quote, so
+                # groundedness has something to check against.
+                content=(
+                    f"--- Trecho 1 [fonte: {source} | distância 0.512]\n"
+                    "O lote suplementar não pode ultrapassar 15% da quantidade."
+                ),
                 tool_call_id="1",
                 name="search_documentation",
             )
@@ -307,3 +313,104 @@ class TestSourceExtractionWithArticles:
         ]
 
         assert extract_retrieved_sources(messages) == [SOURCE]
+
+
+class TestGroundedness:
+    """Whether the answer's numbers came from what the agent read.
+
+    This is the metric the others cannot stand in for. An answer can be
+    correct, cite the right file and still have taken its number from the
+    model's memory, which holds only while that memory agrees with the
+    document.
+    """
+
+    def supported_by(self, passage: str) -> list[ToolMessage]:
+        return [
+            ToolMessage(
+                content=f"[fonte: {SOURCE} | distância 0.4]\n{passage}",
+                tool_call_id="1",
+                name="search_documentation",
+            )
+        ]
+
+    def test_a_number_present_in_the_passage_is_grounded(self) -> None:
+        ratio, missing = groundedness(
+            "O limite é de 15%.", self.supported_by("não pode ultrapassar 15%"), "qual o limite?"
+        )
+
+        assert ratio == 1.0
+        assert missing == []
+
+    def test_a_number_absent_from_the_passage_is_not(self) -> None:
+        ratio, missing = groundedness(
+            "O limite é de 22%.", self.supported_by("não pode ultrapassar 15%"), "qual o limite?"
+        )
+
+        assert ratio == 0.0
+        assert missing == ["22"]
+
+    def test_it_reports_the_ratio_when_only_part_is_supported(self) -> None:
+        ratio, missing = groundedness(
+            "O limite é 15% e o prazo é de 99 dias.",
+            self.supported_by("não pode ultrapassar 15%"),
+            "limite e prazo?",
+        )
+
+        assert ratio == 0.5
+        assert missing == ["99"]
+
+    def test_a_number_the_calculator_produced_counts_as_grounded(self) -> None:
+        """The tool computed it, so it is not something the model invented."""
+        messages = [
+            *self.supported_by("não pode ultrapassar 15%"),
+            ToolMessage(content="75000000", tool_call_id="2", name="calculate"),
+        ]
+
+        ratio, _ = groundedness(
+            "15% de R$ 500 milhões dá R$ 75 milhões.",
+            messages,
+            "numa oferta de R$ 500 milhões, quanto é o lote suplementar?",
+        )
+
+        assert ratio == 1.0
+
+    def test_a_number_from_the_question_counts_as_grounded(self) -> None:
+        ratio, _ = groundedness(
+            "Numa oferta de R$ 500 milhões, sim.",
+            self.supported_by("texto sem número"),
+            "numa oferta de R$ 500 milhões?",
+        )
+
+        assert ratio == 1.0
+
+    def test_a_thousands_separator_does_not_break_the_match(self) -> None:
+        ratio, _ = groundedness(
+            "São R$ 10.680.",
+            [ToolMessage(content="10680", tool_call_id="1", name="calculate")],
+            "quanto?",
+        )
+
+        assert ratio == 1.0
+
+    def test_an_answer_with_no_numbers_is_not_graded(self) -> None:
+        """No claim to check is not the same as a claim that failed."""
+        ratio, missing = groundedness(
+            "O Diretor de Relações com Investidores.", self.supported_by("texto"), "quem?"
+        )
+
+        assert ratio is None
+        assert missing == []
+
+    def test_it_reaches_the_score(self) -> None:
+        score = score_case(case(), answer(f"O limite é 15% (fonte: {SOURCE})", [SOURCE]))
+
+        assert score.grounded is True
+
+    def test_an_ungrounded_number_fails_the_case(self) -> None:
+        score = score_case(
+            case(expected_facts=["99"]),
+            answer(f"O prazo é de 99 dias (fonte: {SOURCE})", [SOURCE]),
+        )
+
+        assert score.grounded is False
+        assert score.passed is False

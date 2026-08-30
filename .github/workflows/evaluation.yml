@@ -1,0 +1,71 @@
+name: Evaluation
+
+# Manual only. Every run reaches the real model: it costs money and takes
+# minutes, which is the wrong trade for a check that fires on every push. The
+# fast checks live in ci.yml and run on every push instead.
+on:
+  workflow_dispatch:
+    inputs:
+      min_score:
+        description: "Nota geral mínima para passar (0 a 1)"
+        default: "0.90"
+        required: true
+      limit:
+        description: "Rodar apenas os N primeiros casos (0 = todos)"
+        default: "0"
+        required: true
+
+jobs:
+  evaluate:
+    name: grade the agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # A fork's pull request never receives secrets. Skipping with a clear
+      # message beats failing with an authentication error nobody can fix.
+      - name: Check for the API key
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY não configurado. Adicione o secret em Settings > Secrets and variables > Actions."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the index
+        if: steps.key.outputs.available == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: rag ingest --reset
+
+      - name: Evaluate
+        if: steps.key.outputs.available == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          rag eval \
+            --min-score "${{ inputs.min_score }}" \
+            ${{ inputs.limit != '0' && format('--limit {0}', inputs.limit) || '' }}
+
+      # Uploaded even on failure: a run that fell below the threshold is
+      # exactly the one whose per-case detail someone needs to read.
+      - name: Upload the report
+        if: always() && steps.key.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: evals/results/
+          retention-days: 30

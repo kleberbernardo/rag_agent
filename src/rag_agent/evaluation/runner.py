@@ -62,6 +62,14 @@ class EvalReport:
         return self._rate(lambda score: score.refusal_correct)
 
     @property
+    def groundedness(self) -> Rate:
+        return self._rate(lambda score: score.grounded)
+
+    @property
+    def ungrounded(self) -> list[CaseScore]:
+        return [score for score in self.scores if score.grounded is False]
+
+    @property
     def overall(self) -> Rate:
         return Rate(sum(score.passed for score in self.scores), len(self.scores))
 
@@ -101,6 +109,7 @@ class EvalReport:
                 "citation_accuracy": self.citation_accuracy.percent,
                 "factual_accuracy": self.factual_accuracy.percent,
                 "refusal_accuracy": self.refusal_accuracy.percent,
+                "groundedness": self.groundedness.percent,
                 "median_latency_seconds": round(self.median_latency, 2),
                 "total_tokens": self.total_tokens,
                 "total_cost_usd": round(self.total_cost_usd, 5),
@@ -117,6 +126,9 @@ class EvalReport:
                     "facts_present": score.facts_present,
                     "refused": score.refused,
                     "refusal_correct": score.refusal_correct,
+                    "grounded": score.grounded,
+                    "groundedness_ratio": score.groundedness_ratio,
+                    "ungrounded_numbers": score.ungrounded_numbers,
                     "latency_seconds": round(score.latency_seconds, 2),
                     "total_tokens": score.total_tokens,
                     "cost_usd": score.cost_usd,

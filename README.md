@@ -595,9 +595,10 @@ the only one that tells you whether a change to the prompt, the chunking or
 the model made things better or worse.
 
 ```bash
-rag eval                    # the whole suite, ~2 minutes, ~US$ 0.02
-rag eval --limit 5          # a quick sample
-rag eval --dataset my.json  # your own questions
+rag eval                     # the whole suite, ~2 minutes, ~US$ 0.02
+rag eval --limit 5           # a quick sample
+rag eval --min-score 0.90    # fail below 90% instead of below perfect
+rag eval --dataset my.json   # your own questions
 ```
 
 ```
@@ -615,6 +616,7 @@ $ rag eval --limit 5
 │ citação   │      100% │ citou a fonte certa                 │
 │ fato      │      100% │ o número ou termo esperado apareceu │
 │ recusa    │       n/a │ admitiu não saber, fora do corpus   │
+│ fundamentação │  100% │ todo número saiu do que ele leu     │
 │ geral     │      100% │ passou em tudo que se aplicava      │
 └───────────┴───────────┴─────────────────────────────────────┘
 gpt-4o-mini · k=8 · mediana 2.28s · 13728 tokens · ~US$ 0.0023
@@ -631,6 +633,57 @@ Failures print with the answer, the documents retrieved and which metric broke,
 and the command exits non-zero so it can gate a release. Reports land in
 `evals/results/` stamped with the model, the embedding model and `retrieval_k`.
 A score without its configuration cannot be compared to the next run.
+
+### Groundedness
+
+The other three metrics compare the answer against the dataset. This one
+compares it against **what the agent actually read**.
+
+Every number the answer states has to appear in a retrieved passage, in a tool
+result, or in the question. A number found in none of those came from the
+model's own memory, and not relying on that memory is the entire reason for
+retrieval.
+
+An answer can be correct, cite the right file, and still be ungrounded. That
+combination holds only while the model's memory agrees with the document, and
+it breaks silently on internal rules, a new version of a norm, anything the
+training data does not already contain. Nothing else in the suite detects it.
+
+Numbers are the claim worth checking in a regulation: they carry the deadlines,
+the percentages and the limits, and they are what a model most confidently
+invents. Matching normalises them, so "75 milhões" in an answer and "75000000"
+in a calculator result are recognised as one number, and an answer with no
+numbers is not graded rather than graded zero.
+
+**Its limits, stated plainly:** it checks numbers, not prose. An invented
+qualifier, a wrong name, a reversed condition all pass. And a false alarm on a
+correct answer would make the metric worse than useless, so the matching is
+deliberately lenient.
+
+A first idea did not survive: flagging a tool call whose arguments hold a
+number nobody had read yet, which would catch the agent choosing a multiplier
+before the passage came back. Measured against the correct behaviour it fired
+just as often, because a number legitimately changes form between the document
+and the expression ("500 milhões" becomes `500000000`, "15%" becomes `0.15`).
+A metric that cannot tell right from wrong was dropped rather than shipped.
+
+### Evaluation in CI
+
+The suite runs from the Actions tab, not on every push:
+
+```
+Actions → Evaluation → Run workflow → min_score
+```
+
+Each run reaches the real model, so it costs money and takes minutes. That is
+the wrong trade for a per-push check, and the fast checks in `ci.yml` already
+cover every push. The report is uploaded as an artifact, including when the run
+falls below the threshold, since that is the one whose detail someone needs to
+read.
+
+It needs `OPENAI_API_KEY` in **Settings → Secrets and variables → Actions**.
+Without it the job skips with a message instead of failing, because a pull
+request from a fork never receives secrets.
 
 ### The dataset
 
@@ -663,6 +716,7 @@ Running it for the first time paid for itself immediately:
 | One failing case aborted the entire suite | Per-case error isolation in the runner | The other 27 results survive |
 | A question so ambiguous the agent was graded wrong for a correct answer, since the article carries five different deadlines for "exigências" | Split into two specific questions | The dataset got honest |
 | Rules separated from the exceptions that qualify them, because chunking cut every 1000 characters | `CHUNK_STRATEGY=articles` | 93% → 97% |
+| Nothing checked whether an answer's numbers came from the documents or from the model's memory | Groundedness | 100%, so far a regression guard rather than a finding |
 
 The first is the dangerous one: a wrong number with a correct citation looks
 more trustworthy than a wrong number alone.
