@@ -77,6 +77,75 @@ back out, and nothing else.
 
 ---
 
+## The agent loop
+
+`create_agent` builds a LangGraph state graph and returns it compiled. The
+project never imports `langgraph` itself, and the graph is not hand-written:
+it has three nodes and one conditional edge.
+
+```
+   __start__
+       │
+       ▼
+   ┌───────┐
+   │ model │ ◄─────────┐
+   └───┬───┘           │
+       │ conditional   │
+   ┌───┴────┐          │
+   ▼        ▼          │
+ tools   __end__       │
+   │                   │
+   └───────────────────┘
+```
+
+The conditional edge carries the whole idea. After the model speaks, the graph
+asks whether it requested a tool:
+
+- **yes** → run `tools`, feed the output back into `model`
+- **no** → `__end__`, the answer is final
+
+That cycle lets the agent search, read what came back, and decide again. Without it the flow is linear: retrieve once, answer, stop.
+
+The loop is capped at ten steps. A question the corpus cannot answer once made
+the agent search over and over, each round adding passages, until the context
+window overflowed and the call died.
+
+## Technologies
+
+| Layer | Used |
+|---|---|
+| Orchestration | LangChain, LangGraph through `create_agent` |
+| Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small` |
+| Vector store | ChromaDB, embedded or as a server |
+| HTTP | FastAPI, Uvicorn |
+| CLI | Typer, Rich |
+| Configuration | Pydantic Settings |
+| Documents | pypdf |
+| Observability | Langfuse, optional |
+| Quality | pytest, ruff, mypy |
+| Infrastructure | Docker, Compose, GitHub Actions |
+
+## Concepts
+
+| Concept | Where it lives |
+|---|---|
+| Retrieval-augmented generation | The whole project |
+| Embeddings and semantic search | `indexing/vector_store.py` |
+| Chunking | Two strategies: by character, by article |
+| Chunk overlap | 200 characters, so an idea survives a boundary |
+| Tool calling | `tools/`, where the model picks what to run |
+| Agent loop | The conditional edge above |
+| Grounding and source citation | Every answer names its document |
+| Idempotent ingestion | A chunk's id is a hash of its content |
+| Evaluation | 29 cases, five deterministic metrics |
+| Groundedness | Every number has to come from what was read |
+| LLMOps | Latency, tokens, cost, tracing |
+| Sandboxing | The calculator validates by AST before evaluating |
+| Layered architecture | Interfaces on top of one service layer |
+| Configuration by environment | Every setting read from the environment |
+
+---
+
 ## Installation
 
 Requires Python 3.12+ and an OpenAI API key.
@@ -322,7 +391,7 @@ data/*  ──▶  load  ──▶  split  ──▶  embed  ──▶  .chroma/
 ```
 
 **Load**. Each file becomes a `Document` carrying its filename as metadata.
-That metadata is what lets the final answer cite a source. PDFs become one
+The final answer cites its source from that metadata. PDFs become one
 document per page, so a citation can point at a page number.
 
 **Split**. Two strategies, chosen by `CHUNK_STRATEGY`.
@@ -685,8 +754,7 @@ and the command exits non-zero when the overall score falls below
 Each run writes a timestamped report to `evals/results/`, and those are kept
 in the repository. Every one records the model, the embedding model and
 `retrieval_k` alongside the score, because a number without the configuration
-behind it cannot be compared to the next run. The history is what shows the
-effect of a change: the reports here trace 82% to 86% to 93% to 97%, each step
+behind it cannot be compared to the next run. The history shows the effect of a change: the reports here trace 82% to 86% to 93% to 97%, each step
 a single setting.
 
 ### Groundedness
@@ -712,8 +780,8 @@ numbers is not graded rather than graded zero.
 
 **Its limits, stated plainly:** it checks numbers, not prose. An invented
 qualifier, a wrong name, a reversed condition all pass. And a false alarm on a
-correct answer would make the metric worse than useless, so the matching is
-deliberately lenient.
+correct answer would leave the metric useless, so the matching is deliberately
+lenient.
 
 A first idea did not survive: flagging a tool call whose arguments hold a
 number nobody had read yet, which would catch the agent choosing a multiplier
@@ -755,7 +823,7 @@ established name in the RAG evaluation literature.
 
 RAGAS, LangSmith Evaluation, DeepEval and Langfuse Datasets all cover this
 ground, and none of them is used here. They share one default: a language
-model grades the answers. That costs money on every run and, worse, drifts —
+model grades the answers. That costs money on every run and it drifts:
 the same answer can score differently twice, and a suite whose numbers move on
 their own cannot tell a regression from noise.
 
