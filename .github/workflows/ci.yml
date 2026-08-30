@@ -56,6 +56,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner's default buildx driver cannot export a cache. The
+      # container driver can, and that is what makes cache-to below work.
+      - uses: docker/setup-buildx-action@v3
+
       # Building the image on every push is what keeps the Dockerfile honest:
       # a dependency or a path that only works on the author's machine shows
       # up here instead of in front of whoever tries to run the project.
