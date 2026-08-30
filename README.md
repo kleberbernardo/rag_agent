@@ -172,10 +172,12 @@ to the calculator, and cited the page it took the limit from.
 
 ```bash
 rag chat
+rag chat --trace        # adds the tools used and the cost of each turn
 ```
 
 Keeps context between turns, so follow-up questions work without repeating the
-subject. Exit with `sair`, `exit` or `Ctrl+C`.
+subject. Exit with `sair`, `exit` or `Ctrl+C`. Every command also takes
+`--verbose`, which turns on the log of what each module is doing.
 
 ```
 você > o que caracteriza uma informacao relevante?
@@ -218,10 +220,14 @@ rather than failing mid-query.
 | `RETRIEVAL_K` | `4` | Passages retrieved per question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
+| `LOG_DIR` | `logs/` | Where the log file is written. |
 | `VECTOR_STORE_MODE` | `embedded` | `embedded` for a local file, `server` for a standalone Chroma. |
 | `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written in embedded mode. |
 | `CHROMA_HOST` / `CHROMA_PORT` | `localhost` / `8000` | The Chroma server address, used in server mode. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
+| `LANGFUSE_PUBLIC_KEY` | — | Optional. Enables tracing when set together with the secret key. |
+| `LANGFUSE_SECRET_KEY` | — | Optional. See [Observability](#observability). |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse region, e.g. `https://us.cloud.langfuse.com`. |
 
 ---
 
@@ -311,7 +317,9 @@ contract**: it is how the model decides when the tool applies.
   string can never become arbitrary code execution.
 
 To add one: write the function with the `@tool` decorator in its own module
-under `tools/`, then register it in `TOOLS`.
+under `tools/`, then register it in `build_tools()`. It is a function rather
+than a constant because the search tool's description is rendered at call time
+from `KNOWLEDGE_DOMAIN`.
 
 ### Behaviour
 
@@ -327,13 +335,15 @@ that file is how you change how the agent behaves.
 ```
 src/rag_agent/
 ├── config.py          settings, read from the environment and validated at boot
-├── types.py           AnswerResult, SearchHit, ToolCall
+├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
 ├── providers.py       LLM and embedding clients — the only place OpenAI appears
-├── prompts.py         the agent's permanent instructions
+├── prompts.py         the agent's permanent instructions, rendered per domain
+├── pricing.py         token prices, used to estimate what a run cost
+├── observability.py   optional Langfuse tracing, inert without keys
 ├── logging_setup.py   console and file logging
 ├── cli.py             presentation only, no domain logic
 ├── indexing/          loader · splitter · vector_store
-├── tools/             one module per tool, registered in TOOLS
+├── tools/             one module per tool, registered in build_tools()
 └── agent/             service (build + orchestration) · trace
 ```
 
@@ -348,6 +358,7 @@ Everything else is a single module.
 | Add a tool | `tools/` |
 | Chunking or retrieval | `.env` |
 | The model provider | `providers.py` |
+| Token prices | `pricing.py` |
 
 Interfaces stay thin because orchestration lives in `agent/service.py`. Adding
 an HTTP API or a bot means wrapping that service, not rewriting it.
