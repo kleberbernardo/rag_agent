@@ -55,15 +55,30 @@
       "answerable": true
     },
     {
-      "id": "prazo-exigencias",
-      "question": "Qual o prazo para atendimento das exigencias formuladas pela SRE?",
+      "id": "prazo-exigencias-primeiras",
+      "question": "Qual o prazo para atendimento das PRIMEIRAS exigencias formuladas pela SRE, no oficio que suspende a analise?",
       "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
       "expected_facts": [
         "40"
       ],
-      "reference_answer": "O prazo para atendimento das exigencias e de 40 dias uteis.",
+      "reference_answer": "40 dias uteis (Art. 38, par. 1).",
       "tags": [
-        "prazo"
+        "prazo",
+        "desambiguado"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prazo-exigencias-novas",
+      "question": "Apos o oficio de reiteracao, qual o prazo para atendimento das NOVAS exigencias da SRE?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "5"
+      ],
+      "reference_answer": "5 dias uteis (Art. 38, par. 5), prorrogavel uma unica vez por mais 5.",
+      "tags": [
+        "prazo",
+        "desambiguado"
       ],
       "answerable": true
     },

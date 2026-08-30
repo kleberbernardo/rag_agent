@@ -1,0 +1,109 @@
+{
+  "started_at": "2026-08-30T20:23:18+00:00",
+  "model": "gpt-4o-mini",
+  "embedding_model": "text-embedding-3-small",
+  "retrieval_k": 8,
+  "summary": {
+    "cases": 5,
+    "overall": "80%",
+    "retrieval_accuracy": "100%",
+    "citation_accuracy": "100%",
+    "factual_accuracy": "80%",
+    "refusal_accuracy": "n/a",
+    "median_latency_seconds": 2.96,
+    "total_tokens": 14163,
+    "total_cost_usd": 0.00235
+  },
+  "cases": [
+    {
+      "id": "lote-suplementar",
+      "passed": true,
+      "question": "Qual o percentual maximo do lote suplementar em uma oferta publica?",
+      "answer": "O percentual máximo do lote suplementar em uma oferta pública não pode ultrapassar 15% (quinze por cento) da quantidade inicialmente ofertada (fonte: cvm-resolucao-160-ofertas-publicas.pdf).",
+      "retrieved_sources": [
+        "cvm-resolucao-160-ofertas-publicas.pdf"
+      ],
+      "retrieval_hit": true,
+      "citation_correct": true,
+      "facts_present": true,
+      "refused": false,
+      "refusal_correct": null,
+      "latency_seconds": 5.21,
+      "total_tokens": 2708,
+      "cost_usd": 0.0004386,
+      "error": null
+    },
+    {
+      "id": "lote-adicional",
+      "passed": true,
+      "question": "Ate quanto pode ser aumentada a quantidade de valores mobiliarios no lote adicional?",
+      "answer": "A quantidade de valores mobiliários no lote adicional pode ser aumentada até um montante que não exceda 25% da quantidade inicialmente requerida. Esse aumento pode ser feito a critério do ofertante, sem a necessidade de novo requerimento de registro ou modificação dos termos da oferta. No entanto, nas ofertas destinadas exclusivamente a investidores profissionais, esse limite de 25% é dispensado (fonte: cvm-resolucao-160-ofertas-publicas.pdf).",
+      "retrieved_sources": [
+        "cvm-resolucao-160-ofertas-publicas.pdf"
+      ],
+      "retrieval_hit": true,
+      "citation_correct": true,
+      "facts_present": true,
+      "refused": false,
+      "refusal_correct": null,
+      "latency_seconds": 3.13,
+      "total_tokens": 2890,
+      "cost_usd": 0.0004879499999999999,
+      "error": null
+    },
+    {
+      "id": "prazo-analise-sre",
+      "passed": true,
+      "question": "Em quantos dias a SRE deve concluir a analise do requerimento de registro da oferta?",
+      "answer": "A SRE deve concluir a análise do requerimento de registro da oferta no prazo máximo de 60 (sessenta) dias, contado da data do protocolo de todos os documentos necessários. Se não houver manifestação da SRE nesse prazo, o registro é automaticamente deferido (fonte: cvm-resolucao-160-ofertas-publicas.pdf).",
+      "retrieved_sources": [
+        "cvm-resolucao-160-ofertas-publicas.pdf"
+      ],
+      "retrieval_hit": true,
+      "citation_correct": true,
+      "facts_present": true,
+      "refused": false,
+      "refusal_correct": null,
+      "latency_seconds": 2.84,
+      "total_tokens": 2627,
+      "cost_usd": 0.00043634999999999995,
+      "error": null
+    },
+    {
+      "id": "prazo-suficiencia",
+      "passed": true,
+      "question": "Em quanto tempo a SRE informa se os documentos submetidos sao suficientes?",
+      "answer": "A SRE deve informar, no prazo de até 10 (dez) dias contados do protocolo, sobre a suficiência dos documentos submetidos e quais documentos ou informações estão faltando, se for o caso (fonte: cvm-resolucao-160-ofertas-publicas.pdf).",
+      "retrieved_sources": [
+        "cvm-resolucao-160-ofertas-publicas.pdf"
+      ],
+      "retrieval_hit": true,
+      "citation_correct": true,
+      "facts_present": true,
+      "refused": false,
+      "refusal_correct": null,
+      "latency_seconds": 2.96,
+      "total_tokens": 2938,
+      "cost_usd": 0.0004784999999999999,
+      "error": null
+    },
+    {
+      "id": "prazo-exigencias",
+      "passed": false,
+      "question": "Qual o prazo para atendimento das exigencias formuladas pela SRE?",
+      "answer": "O prazo para atendimento das exigências formuladas pela SRE é de 5 (cinco) dias úteis, podendo ser prorrogado uma única vez por mais 5 (cinco) dias úteis, mediante pedido fundamentado. Além disso, a SRE tem 10 (dez) dias úteis para se manifestar sobre o cumprimento das exigências após o recebimento dos documentos. (fonte: cvm-resolucao-160-ofertas-publicas.pdf)",
+      "retrieved_sources": [
+        "cvm-resolucao-160-ofertas-publicas.pdf"
+      ],
+      "retrieval_hit": true,
+      "citation_correct": true,
+      "facts_present": false,
+      "refused": false,
+      "refusal_correct": null,
+      "latency_seconds": 2.69,
+      "total_tokens": 3000,
+      "cost_usd": 0.0005049,
+      "error": null
+    }
+  ]
+}
