@@ -44,5 +44,5 @@ def build_search_tool() -> StructuredTool:
 
 def _format_hit(position: int, hit: SearchHit) -> str:
     """Render one hit with the source label the agent uses to cite it."""
-    header = f"--- Trecho {position} [fonte: {hit.source} | distância {hit.distance:.3f}]"
+    header = f"--- Trecho {position} [fonte: {hit.citation} | distância {hit.distance:.3f}]"
     return f"{header}\n{hit.content}"

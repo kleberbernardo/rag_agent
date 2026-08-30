@@ -74,6 +74,8 @@ def ingest(verbose: bool = VerboseOption) -> None:
         documents,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
+        strategy=settings.chunk_strategy,
+        article_max_chars=settings.article_max_chars,
     )
     console.print(f"[green]OK[/] {len(chunks)} pedaço(s) gerado(s)")
 
@@ -146,7 +148,10 @@ def status() -> None:
 
     console.print(f"[bold]modelo      [/] {settings.chat_model}")
     console.print(f"[bold]embeddings  [/] {settings.embedding_model}")
-    console.print(f"[bold]chunk       [/] {settings.chunk_size} / overlap {settings.chunk_overlap}")
+    console.print(
+        f"[bold]chunk       [/] {settings.chunk_strategy.value} · "
+        f"{settings.chunk_size} / overlap {settings.chunk_overlap}"
+    )
     console.print(f"[bold]domínio     [/] {settings.knowledge_domain}")
     console.print(f"[bold]documentos  [/] {settings.data_dir}")
     console.print(

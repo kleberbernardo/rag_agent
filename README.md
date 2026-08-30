@@ -21,8 +21,8 @@ says so instead of inventing one.
   cost, with optional full tracing to Langfuse.
 - **Domain-agnostic** — the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
-- **Evaluated** — 28 graded questions, including ones the corpus cannot answer.
-  Currently 93%.
+- **Evaluated** — 29 graded questions, including ones the corpus cannot answer.
+  Currently 97%.
 
 ---
 
@@ -217,7 +217,9 @@ rather than failing mid-query.
 | `CHAT_MODEL` | `gpt-4o-mini` | Model that reasons and picks tools. |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model that turns text into vectors. |
 | `TEMPERATURE` | `0.0` | `0` is deterministic — what you want for grounded answers. |
+| `CHUNK_STRATEGY` | `articles` | `articles` gives each `Art. N` its own chunk; `characters` cuts by length. |
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
+| `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
@@ -248,10 +250,27 @@ data/*  ──▶  load  ──▶  split  ──▶  embed  ──▶  .chroma/
 That metadata is what lets the final answer cite a source. PDFs become one
 document per page, so a citation can point at a page number.
 
-**Split** — documents are cut into chunks of `CHUNK_SIZE` characters, breaking
-at paragraph boundaries first, then lines, then sentences, then words. Chunks
-overlap by `CHUNK_OVERLAP` characters so an idea that falls across a boundary
-survives whole in at least one of them.
+**Split** — two strategies, chosen by `CHUNK_STRATEGY`.
+
+`characters` cuts every `CHUNK_SIZE` characters, breaking at paragraph
+boundaries first, then lines, sentences and words. Chunks overlap by
+`CHUNK_OVERLAP` characters so an idea falling across a boundary survives whole
+in at least one of them.
+
+`articles` gives each `Art. N` its own chunk. Legal and regulatory texts are
+already divided by their author, and cutting every 1000 characters separates a
+rule from the exception that qualifies it — the shipped corpus has one article
+carrying five different deadlines across its paragraphs. Only a capitalised
+`Art.` opens an article; lowercase `art. 36` is a cross-reference inside a
+sentence, and this corpus has 138 of those against 106 real headings.
+
+It is adaptive: a source with fewer than three headings falls back to
+characters, so a plain README in the folder is unharmed. PDF pages are joined
+before splitting, because an article routinely spans a page break. Articles
+over `ARTICLE_MAX_CHARS` are split further — annexes carry no headings, and one
+arrived as a single 148,000-character block.
+
+Measured on the shipped corpus: **93% by characters, 97% by articles.**
 
 **Embed** — each chunk is sent to the embedding model and comes back as a
 vector: a list of numbers positioning that text in semantic space. Chunks that
@@ -472,11 +491,11 @@ rag eval --dataset my.json  # your own questions
 ├───────────┼───────────┼─────────────────────────────────────┤
 │ retrieval │      100% │ trouxe o documento certo            │
 │ citação   │      100% │ citou a fonte certa                 │
-│ fato      │       92% │ o número ou termo esperado apareceu │
+│ fato      │       96% │ o número ou termo esperado apareceu │
 │ recusa    │      100% │ admitiu não saber, fora do corpus   │
-│ geral     │       93% │ passou em tudo que se aplicava      │
+│ geral     │       97% │ passou em tudo que se aplicava      │
 └───────────┴───────────┴─────────────────────────────────────┘
-gpt-4o-mini · k=8 · mediana 2.35s · 109821 tokens · ~US$ 0.0177
+gpt-4o-mini · k=8 · articles · mediana 2.48s · ~US$ 0.023
 ```
 
 Failures print with the answer, the documents retrieved and which metric broke,
@@ -486,7 +505,7 @@ and the command exits non-zero so it can gate a release. Reports land in
 
 ### The dataset
 
-`evals/dataset.json` holds 28 questions: 24 answerable and **4 deliberately
+`evals/dataset.json` holds 29 questions: 25 answerable and **4 deliberately
 outside the corpus**. The out-of-corpus cases are the important ones. They
 measure whether the agent admits ignorance instead of inventing, which nothing
 else in the project can catch.
@@ -513,9 +532,16 @@ Running it for the first time paid for itself immediately:
 | Right document, wrong deadline — 5 cases where the answer cited the correct file with the wrong number | `RETRIEVAL_K` 4 → 8 | 82% → 86% |
 | The agent never stopped searching for an answer that was not there, until the context window overflowed and killed the whole run | A rule capping retries, plus `recursion_limit` on the graph | 86% → 93% |
 | One failing case aborted the entire suite | Per-case error isolation in the runner | The other 27 results survive |
+| A question so ambiguous the agent was graded wrong for a correct answer — the article carries five different deadlines for "exigências" | Split into two specific questions | The dataset got honest |
+| Rules separated from the exceptions that qualify them, because chunking cut every 1000 characters | `CHUNK_STRATEGY=articles` | 93% → 97% |
 
 The first is the dangerous one: a wrong number with a correct citation looks
 more trustworthy than a wrong number alone.
+
+A failing case has three possible causes, and only reading the answer tells
+them apart: the agent wrote badly, retrieval fetched the wrong passage, or the
+question itself was ambiguous. Mistaking the third for the first means
+"fixing" an agent that was right.
 
 ---
 

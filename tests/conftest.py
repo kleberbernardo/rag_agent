@@ -32,6 +32,8 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "TEMPERATURE",
         "CHUNK_SIZE",
         "CHUNK_OVERLAP",
+        "CHUNK_STRATEGY",
+        "ARTICLE_MAX_CHARS",
         "RETRIEVAL_K",
         "DATA_DIR",
         "VECTOR_STORE_DIR",

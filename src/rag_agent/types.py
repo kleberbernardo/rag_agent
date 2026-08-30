@@ -27,6 +27,17 @@ class SearchHit:
     def content(self) -> str:
         return self.document.page_content
 
+    @property
+    def article(self) -> str | None:
+        """The article this passage came from, when the chunking found one."""
+        article = self.document.metadata.get("article")
+        return str(article) if article else None
+
+    @property
+    def citation(self) -> str:
+        """How the passage should be cited: file, plus article when known."""
+        return f"{self.source}, {self.article}" if self.article else self.source
+
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:

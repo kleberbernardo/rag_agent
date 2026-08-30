@@ -269,3 +269,41 @@ class TestReport:
 
         assert written["summary"]["cases"] == 1
         assert written["cases"][0]["id"] == "c1"
+
+
+class TestSourceExtractionWithArticles:
+    """Article chunking put the article in the label; the parser had to follow.
+
+    This regression cost a full evaluation run: the metric read
+    "arquivo.pdf, Art. 38" as the source name and every comparison failed,
+    reporting 12% retrieval on a system that had in fact improved.
+    """
+
+    def test_reads_only_the_file_name(self) -> None:
+        message = ToolMessage(
+            content=f"--- Trecho 1 [fonte: {SOURCE}, Art. 38 | distância 0.512]\nconteúdo",
+            tool_call_id="1",
+            name="search_documentation",
+        )
+
+        assert extract_retrieved_sources([message]) == [SOURCE]
+
+    def test_still_reads_a_label_without_an_article(self) -> None:
+        message = ToolMessage(
+            content=f"--- Trecho 1 [fonte: {SOURCE} | distância 0.512]\nconteúdo",
+            tool_call_id="1",
+            name="search_documentation",
+        )
+
+        assert extract_retrieved_sources([message]) == [SOURCE]
+
+    def test_the_same_file_under_two_articles_counts_once(self) -> None:
+        messages = [
+            ToolMessage(
+                content=f"[fonte: {SOURCE}, Art. 38 | distância 0.5]\n[fonte: {SOURCE}, Art. 40 | distância 0.6]",
+                tool_call_id="1",
+                name="search_documentation",
+            )
+        ]
+
+        assert extract_retrieved_sources(messages) == [SOURCE]

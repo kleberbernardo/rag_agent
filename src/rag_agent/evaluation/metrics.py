@@ -16,8 +16,10 @@ from langchain_core.messages import BaseMessage, ToolMessage
 from rag_agent.evaluation.dataset import EvalCase
 from rag_agent.types import AnswerResult
 
-# The tool renders each retrieved passage with a "[fonte: nome.pdf" label.
-_SOURCE_LABEL = re.compile(r"\[fonte:\s*([^\]|]+)")
+# The tool renders each passage as "[fonte: nome.pdf, Art. 12 | distância ...]".
+# Only the file name is captured: the article is useful in a citation but the
+# dataset grades at document level.
+_SOURCE_LABEL = re.compile(r"\[fonte:\s*([^\],|]+)")
 
 # What the system prompt tells the agent to say when nothing was found.
 _REFUSAL_MARKERS = (
