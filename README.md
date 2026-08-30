@@ -28,6 +28,55 @@ says so instead of inventing one.
 
 ---
 
+## Architecture
+
+Two phases that never run at the same time, and two interfaces over one
+service layer.
+
+```
+INGESTION  ·  offline, `rag ingest`
+
+   data/*.pdf ──► loader ──► splitter ──► embeddings ──► Chroma
+                  pdf, md    per article    OpenAI       embedded file
+                  txt, rst   Art. 1, 2…                  or server
+
+
+QUERY  ·  online
+
+   CLI  rag ask ───┐
+                   ├──► service ──► agent ──┬──► search_documentation ──► Chroma
+   API  POST /ask ─┘                  ▲     │
+                                      │     └──► calculate
+                                      └─────────┘  the result comes back
+
+                   answer + source + latency · tokens · cost
+                                       │
+                            ┌──────────┴──────────┐
+                            ▼                     ▼
+                      Langfuse trace         rag eval · 29 cases · 97%
+```
+
+The loop separates this from a plain pipeline. A pipeline retrieves once and
+answers. Here the model may skip retrieval, retry with different terms, or
+chain a second tool, and it stops only when it writes prose instead of calling
+something.
+
+Both interfaces sit on `service`, so neither holds orchestration of its own.
+The CLI and the HTTP layer translate their input into a call and the result
+back out, and nothing else.
+
+| Layer | Module | Responsibility |
+|---|---|---|
+| Interfaces | `cli.py`, `api/` | Translate in and out. No decisions. |
+| Orchestration | `agent/` | Build the graph, run a turn, measure it. |
+| Capabilities | `tools/` | What the model may call. |
+| Retrieval | `indexing/` | Load, split, embed, search. |
+| Providers | `providers.py` | The only place OpenAI appears. |
+| Behaviour | `prompts.py` | The rules, rendered per domain. |
+| Measurement | `evaluation/` | Grade the agent against known answers. |
+
+---
+
 ## Installation
 
 Requires Python 3.12+ and an OpenAI API key.
@@ -630,9 +679,14 @@ The whole suite, all 29 cases, currently scores **97%**, with the single
 failure described below.
 
 Failures print with the answer, the documents retrieved and which metric broke,
-and the command exits non-zero so it can gate a release. Reports land in
-`evals/results/` stamped with the model, the embedding model and `retrieval_k`.
-A score without its configuration cannot be compared to the next run.
+and the command exits non-zero when the overall score falls below
+`--min-score`, so it can gate a release.
+
+Each run writes a timestamped report to `evals/results/`, which is local and
+untracked. The committed reference is **`evals/baseline.json`**, the last
+result worth comparing against, stamped with the model, the embedding model
+and `retrieval_k`. A score without its configuration cannot be compared to the
+next run.
 
 ### Groundedness
 

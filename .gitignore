@@ -41,3 +41,6 @@ desktop.ini
 
 # Crash dumps do Git Bash no Windows
 *.stackdump
+
+# Relatórios de avaliação são artefatos locais; o de referência é evals/baseline.json
+evals/results/
