@@ -28,6 +28,13 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "DATA_DIR",
         "VECTOR_STORE_DIR",
         "COLLECTION_NAME",
+        "KNOWLEDGE_DOMAIN",
+        "VECTOR_STORE_MODE",
+        "CHROMA_HOST",
+        "CHROMA_PORT",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_HOST",
     ):
         monkeypatch.delenv(variable, raising=False)
 

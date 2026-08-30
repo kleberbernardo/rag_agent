@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,6 +10,13 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ROOT_MARKER = "pyproject.toml"
+
+
+class VectorStoreMode(StrEnum):
+    """Where the vector store lives."""
+
+    EMBEDDED = "embedded"
+    SERVER = "server"
 
 
 def _find_project_root() -> Path:
@@ -43,11 +51,34 @@ class Settings(BaseSettings):
 
     retrieval_k: int = Field(default=4, gt=0)
 
+    knowledge_domain: str = Field(default="a documentação interna da organização", min_length=3)
+    """What the knowledge base is about, in the language of the answers.
+
+    This is injected into the system prompt and into the search tool's
+    description, which is what keeps the agent domain-agnostic: pointing it
+    at a different corpus is a configuration change, not a code change.
+    """
+
     data_dir: Path = Field(default=PROJECT_ROOT / "data")
+    log_dir: Path = Field(default=PROJECT_ROOT / "logs")
+
+    vector_store_mode: VectorStoreMode = Field(default=VectorStoreMode.EMBEDDED)
     vector_store_dir: Path = Field(default=PROJECT_ROOT / ".chroma")
+    chroma_host: str = Field(default="localhost")
+    chroma_port: int = Field(default=8000, gt=0, le=65535)
     collection_name: str = Field(default="rag_agent_docs")
 
-    log_dir: Path = Field(default=PROJECT_ROOT / "logs")
+    langfuse_public_key: SecretStr = Field(default=SecretStr(""))
+    langfuse_secret_key: SecretStr = Field(default=SecretStr(""))
+    langfuse_host: str = Field(default="https://cloud.langfuse.com")
+
+    @property
+    def tracing_enabled(self) -> bool:
+        """Tracing turns itself on only when both Langfuse keys are present."""
+        return bool(
+            self.langfuse_public_key.get_secret_value()
+            and self.langfuse_secret_key.get_secret_value()
+        )
 
 
 @lru_cache

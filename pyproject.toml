@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rag-agent"
 version = "0.1.0"
-description = "Agente RAG sobre a documentacao interna do produto Nimbus."
+description = "Agentic RAG over your own documents: LangChain, LangGraph, Chroma and tool calling."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

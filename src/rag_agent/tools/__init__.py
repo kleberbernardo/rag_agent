@@ -1,17 +1,25 @@
 """Tool registry.
 
 A tool is a plain function the model may decide to call. The model never sees
-the body -- only the name, the signature and the docstring. That docstring is
-the contract, which is why it is written in the same language as the answers.
+the body -- only the name, the signature and the description. That description
+is the contract, which is why it is written in the same language as the
+answers and built from the configured knowledge domain.
 
-To add a tool: write it in its own module, then register it in TOOLS.
+Tools are assembled by a function rather than held in a constant because the
+search tool's description depends on settings read at runtime.
+
+To add a tool: write it in its own module, then register it in build_tools().
 """
 
 from langchain_core.tools import BaseTool
 
 from rag_agent.tools.calculator import calculate
-from rag_agent.tools.documentation import search_documentation
+from rag_agent.tools.documentation import build_search_tool, search_documentation
 
-TOOLS: list[BaseTool] = [search_documentation, calculate]
 
-__all__ = ["TOOLS", "calculate", "search_documentation"]
+def build_tools() -> list[BaseTool]:
+    """Assemble every tool the agent may call."""
+    return [build_search_tool(), calculate]
+
+
+__all__ = ["build_search_tool", "build_tools", "calculate", "search_documentation"]

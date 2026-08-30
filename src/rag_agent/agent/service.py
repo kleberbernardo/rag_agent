@@ -12,9 +12,9 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from rag_agent.prompts import SYSTEM_PROMPT
+from rag_agent.prompts import build_system_prompt
 from rag_agent.providers import build_chat_model
-from rag_agent.tools import TOOLS
+from rag_agent.tools import build_tools
 from rag_agent.types import AnswerResult, ToolCall
 
 logger = logging.getLogger(__name__)
@@ -29,8 +29,8 @@ def build_agent() -> Any:
     """
     return create_agent(
         model=build_chat_model(),
-        tools=TOOLS,
-        system_prompt=SYSTEM_PROMPT,
+        tools=build_tools(),
+        system_prompt=build_system_prompt(),
     )
 
 

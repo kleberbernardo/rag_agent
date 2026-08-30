@@ -19,7 +19,10 @@ from rag_agent.indexing import count_documents, index_documents, load_documents,
 from rag_agent.logging_setup import setup_logging
 from rag_agent.types import AnswerResult
 
-app = typer.Typer(add_completion=False, help="Assistente RAG sobre a documentação do Nimbus.")
+app = typer.Typer(
+    add_completion=False,
+    help="Agente RAG sobre a sua própria base de documentos.",
+)
 console = Console()
 
 _EMPTY_INDEX_HINT = "[yellow]O índice está vazio. Rode primeiro:[/] rag ingest"
@@ -117,6 +120,7 @@ def status() -> None:
     console.print(f"[bold]modelo      [/] {settings.chat_model}")
     console.print(f"[bold]embeddings  [/] {settings.embedding_model}")
     console.print(f"[bold]chunk       [/] {settings.chunk_size} / overlap {settings.chunk_overlap}")
+    console.print(f"[bold]domínio     [/] {settings.knowledge_domain}")
     console.print(f"[bold]documentos  [/] {settings.data_dir}")
     console.print(f"[bold]índice      [/] {settings.vector_store_dir}")
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")

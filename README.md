@@ -188,6 +188,7 @@ rather than failing mid-query.
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
 | `RETRIEVAL_K` | `4` | Passages retrieved per question. |
+| `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
 | `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
