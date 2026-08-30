@@ -13,6 +13,8 @@ says so instead of inventing one.
   different terms, and can reach for other tools.
 - **Local index** — the vector store is an embedded database on disk. No server
   to run.
+- **Domain-agnostic** — the subject lives in configuration, not in code. Swap
+  the folder, change one variable, re-ingest.
 
 ---
 
@@ -102,7 +104,13 @@ All commands below assume the environment is active.
 Drop files into `data/`. Supported: `.md`, `.txt`, `.markdown`, `.rst` and
 `.pdf`. Subfolders are scanned recursively; anything else is skipped.
 
-The repository ships with sample documentation so you can try it immediately.
+The repository ships with a real corpus so you can try it immediately: three
+consolidated resolutions from the CVM, the Brazilian securities regulator —
+204 pages covering suitability, disclosure of material information and public
+offerings. Provenance is recorded in `docs/knowledge-base-sources.md`.
+
+Nothing in the code depends on them. To use your own, empty `data/`, set
+`KNOWLEDGE_DOMAIN` in `.env`, delete `.chroma/` and re-ingest.
 
 ### 2. Build the index
 
@@ -118,30 +126,33 @@ them.
 ### 3. Ask
 
 ```bash
-rag ask "what are the technical limits?"
-rag ask "what does a full year cost?" --trace
+rag ask "o que e o dever de verificacao da adequacao dos produtos?"
+rag ask "qual o percentual maximo do lote suplementar?" --trace
 ```
 
 `--trace` prints the agent's reasoning: which tools it chose, with which
 arguments, and what each returned.
 
 ```
-$ rag ask "what does the mid-tier plan cost per year?" --trace
+$ rag ask "qual o percentual maximo do lote suplementar numa oferta publica?
+           numa oferta de R$ 500 milhoes, quanto isso representa?" --trace
 
-╭─ raciocínio ───────────────────────────────────────────╮
-│ [AGENTE decide] chamar search_documentation(...)       │
-│ [FERRAMENTA] -> R$ 890 per month...                    │
-│ [AGENTE decide] chamar calculate({'expr': '890 * 12'}) │
-│ [FERRAMENTA] -> 10680                                  │
-╰────────────────────────────────────────────────────────╯
-╭─ resposta ─────────────────────────────────────────────╮
-│ R$ 890 per month, so R$ 10,680 per year.               │
-│ (fonte: produto.md)                                    │
-╰────────────────────────────────────────────────────────╯
+╭─ raciocínio ──────────────────────────────────────────────────╮
+│ [AGENTE decide] chamar search_documentation(...)              │
+│ [AGENTE decide] chamar calculate({'expression': '5e8 * 0.15'})│
+│ [FERRAMENTA search_documentation] -> a observância do limi... │
+│ [FERRAMENTA calculate] -> 75000000                            │
+╰───────────────────────────────────────────────────────────────╯
+╭─ resposta ────────────────────────────────────────────────────╮
+│ O percentual máximo do lote suplementar é de 15% da           │
+│ quantidade inicialmente ofertada. Em uma oferta de R$ 500     │
+│ milhões, isso representa R$ 75 milhões.                       │
+│ (fonte: cvm-resolucao-160-ofertas-publicas.pdf)               │
+╰───────────────────────────────────────────────────────────────╯
 ```
 
-Note that the agent did not do the arithmetic itself — it looked up the price
-and delegated the multiplication.
+The agent did not do the arithmetic itself — it delegated the multiplication
+to the calculator, and cited the page it took the limit from.
 
 ### 4. Or hold a conversation
 
@@ -153,11 +164,14 @@ Keeps context between turns, so follow-up questions work without repeating the
 subject. Exit with `sair`, `exit` or `Ctrl+C`.
 
 ```
-você > what does the Growth plan cost?
-agente > R$ 890 per month. (fonte: produto.md)
+você > o que caracteriza uma informacao relevante?
+agente > É qualquer decisão ou fato que possa influir de modo ponderável
+         na cotação dos valores mobiliários...
+         (fonte: cvm-resolucao-44-informacoes-relevantes.pdf)
 
-você > and the cheaper one?          ← no need to name it again
-agente > The Starter plan is R$ 290 per month. (fonte: produto.md)
+você > e quem tem o dever de divulgar?     ← no need to restate the subject
+agente > O Diretor de Relações com Investidores...
+         (fonte: cvm-resolucao-44-informacoes-relevantes.pdf)
 
 você > sair
 ```
