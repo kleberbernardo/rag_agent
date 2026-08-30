@@ -682,11 +682,12 @@ Failures print with the answer, the documents retrieved and which metric broke,
 and the command exits non-zero when the overall score falls below
 `--min-score`, so it can gate a release.
 
-Each run writes a timestamped report to `evals/results/`, which is local and
-untracked. The committed reference is **`evals/baseline.json`**, the last
-result worth comparing against, stamped with the model, the embedding model
-and `retrieval_k`. A score without its configuration cannot be compared to the
-next run.
+Each run writes a timestamped report to `evals/results/`, and those are kept
+in the repository. Every one records the model, the embedding model and
+`retrieval_k` alongside the score, because a number without the configuration
+behind it cannot be compared to the next run. The history is what shows the
+effect of a change: the reports here trace 82% to 86% to 93% to 97%, each step
+a single setting.
 
 ### Groundedness
 
@@ -738,6 +739,35 @@ read.
 It needs `OPENAI_API_KEY` in **Settings → Secrets and variables → Actions**.
 Without it the job skips with a message instead of failing, because a pull
 request from a fork never receives secrets.
+
+### Relation to existing tools
+
+The metric names used here are local. The concepts are not: each one has an
+established name in the RAG evaluation literature.
+
+| This project | Standard name | Where it is found |
+|---|---|---|
+| retrieval | context recall | RAGAS |
+| fato | answer correctness | RAGAS, DeepEval |
+| fundamentação | faithfulness, groundedness | RAGAS, TruLens |
+| citação | attribution | LangSmith |
+| recusa | hallucination rate on unanswerable questions | RAGAS |
+
+RAGAS, LangSmith Evaluation, DeepEval and Langfuse Datasets all cover this
+ground, and none of them is used here. They share one default: a language
+model grades the answers. That costs money on every run and, worse, drifts —
+the same answer can score differently twice, and a suite whose numbers move on
+their own cannot tell a regression from noise.
+
+The trade taken instead: deterministic scoring against a smaller dataset
+verified by hand. Twenty-nine cases whose answers were read out of the source
+documents, graded by string and set operations. The cost is coverage, since
+these metrics check numbers and file names rather than meaning. The gain is
+that the same run always produces the same number, and it costs nothing to
+grade.
+
+A judge model would be the right call for a larger dataset, or for grading
+prose where the wording legitimately varies. At this size it would buy noise.
 
 ### The dataset
 
