@@ -1,14 +1,24 @@
 name: Evaluation
 
-# Manual only. Every run reaches the real model: it costs money and takes
-# minutes, which is the wrong trade for a check that fires on every push. The
-# fast checks live in ci.yml and run on every push instead.
+# Manual, plus one scheduled run a week. Never on push: every run reaches the
+# real model, so it costs money and takes minutes, which is the wrong trade for
+# a per-commit check. The fast checks live in ci.yml and cover every push.
 on:
+  # Weekly, because the corpus stops changing but the model does not. A
+  # provider updating gpt-4o-mini underneath a frozen project moves the score
+  # with no commit to blame, and a run every Monday is how that surfaces.
+  schedule:
+    - cron: "0 6 * * 1"
+
   workflow_dispatch:
     inputs:
       min_score:
         description: "Nota geral mínima para passar (0 a 1)"
         default: "0.90"
+        required: true
+      max_cost:
+        description: "Custo máximo em US$ (0 desliga)"
+        default: "0.10"
         required: true
       limit:
         description: "Rodar apenas os N primeiros casos (0 = todos)"
@@ -19,6 +29,8 @@ jobs:
   evaluate:
     name: grade the agent
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -56,12 +68,28 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # The scheduled run passes no inputs, so each falls back to the
+          # default it would have had in the manual form.
           rag eval \
-            --min-score "${{ inputs.min_score }}" \
-            ${{ inputs.limit != '0' && format('--limit {0}', inputs.limit) || '' }}
+            --min-score "${{ inputs.min_score || '0.90' }}" \
+            --max-cost "${{ inputs.max_cost || '0.10' }}" \
+            ${{ (inputs.limit != '' && inputs.limit != '0') && format('--limit {0}', inputs.limit) || '' }}
 
       # Uploaded even on failure: a run that fell below the threshold is
       # exactly the one whose per-case detail someone needs to read.
+      # The trend only exists if the reports survive. Artifacts expire; a
+      # commit does not.
+      - name: Keep the report
+        if: always() && steps.key.outputs.available == 'true'
+        run: |
+          if [ -n "$(git status --porcelain evals/results)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add evals/results
+            git commit -m "chore: relatório de avaliação de $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
       - name: Upload the report
         if: always() && steps.key.outputs.available == 'true'
         uses: actions/upload-artifact@v4

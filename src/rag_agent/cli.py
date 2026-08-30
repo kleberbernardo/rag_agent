@@ -21,9 +21,12 @@ from rag_agent.config import PROJECT_ROOT, get_settings
 from rag_agent.evaluation import (
     DEFAULT_DATASET,
     CaseScore,
+    Comparison,
     EvalReport,
     build_report,
+    compare,
     load_dataset,
+    load_report,
     run_evaluation,
     save_report,
 )
@@ -54,6 +57,13 @@ TraceOption = typer.Option(False, "--trace", "-t", help="Mostra o raciocínio do
 DatasetOption = typer.Option(DEFAULT_DATASET, "--dataset", "-d", help="Arquivo do dataset.")
 LimitOption = typer.Option(0, "--limit", "-n", help="Roda apenas os N primeiros casos.")
 SaveOption = typer.Option(True, "--save/--no-save", help="Grava o relatório em evals/results.")
+CompareOption = typer.Option(None, "--compare", "-c", help="Compara com um relatório anterior.")
+MaxCostOption = typer.Option(
+    0.0,
+    "--max-cost",
+    min=0.0,
+    help="Custo máximo em US$ para a execução inteira. 0 desliga a checagem.",
+)
 MinScoreOption = typer.Option(
     1.0,
     "--min-score",
@@ -184,7 +194,9 @@ def eval_command(
     dataset: Path = DatasetOption,
     limit: int = LimitOption,
     save: bool = SaveOption,
+    compare_with: Path | None = CompareOption,
     min_score: float = MinScoreOption,
+    max_cost: float = MaxCostOption,
     verbose: bool = VerboseOption,
 ) -> None:
     """Mede o agente contra perguntas cuja resposta é conhecida."""
@@ -207,9 +219,21 @@ def eval_command(
     report = build_report(scores)
     _render_report(report)
 
+    if compare_with is not None:
+        _render_comparison(compare(load_report(compare_with), report), compare_with)
+
     if save:
         path = save_report(report, PROJECT_ROOT / "evals" / "results")
         console.print(f"[dim]relatório salvo em {path}")
+
+    # A verbose prompt or a larger k shows up here as a number rather than as a
+    # surprise on the invoice.
+    if max_cost and report.total_cost_usd > max_cost:
+        console.print(
+            f"\n[red]acima do teto de custo:[/] "
+            f"US$ {report.total_cost_usd:.4f} > US$ {max_cost:.4f}"
+        )
+        raise typer.Exit(code=1)
 
     # A threshold rather than "every case must pass": one known failure should
     # not block a release, while a real regression should.
@@ -282,6 +306,33 @@ def serve(
     # Passed as an import string rather than the object, because --reload needs
     # to re-import the module in a fresh process.
     uvicorn.run("rag_agent.api.app:app", host=host, port=port, reload=reload)
+
+
+def _render_comparison(diff: Comparison, source: Path) -> None:
+    """Show what moved, and what setting moved with it."""
+    console.print(f"\n[bold]comparação com[/] {source.name}")
+
+    if diff.settings:
+        for name, (before, after) in diff.settings.items():
+            console.print(f"  [cyan]{name}[/] {before} → {after}")
+    elif diff.baseline_unknown_configuration:
+        # Reports written before the configuration was recorded cannot be
+        # compared setting by setting. Saying so beats implying nothing moved.
+        console.print("  [dim]o relatório antigo não gravou a configuração")
+
+    for name, (before, after) in diff.changed_metrics.items():
+        console.print(f"  {name:<20} {before} → {after}")
+
+    if not diff.changed_metrics:
+        console.print("  [dim]nenhuma métrica mudou")
+
+    for case in diff.cases:
+        if case.change.value in {"corrigido", "quebrado"}:
+            cor = "red" if case.is_regression else "green"
+            console.print(f"  [{cor}]{case.change.value}[/] {case.case_id}")
+
+    if diff.regressions:
+        console.print(f"  [red]{len(diff.regressions)} regressão(ões)")
 
 
 def _require_index() -> None:

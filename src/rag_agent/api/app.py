@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from rag_agent import __version__
+from rag_agent.api.feedback import FeedbackStore
 from rag_agent.api.routes import router
 from rag_agent.api.sessions import SessionStore
 from rag_agent.config import get_settings
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Report the state of the index at boot, rather than at the first request."""
     setup_logging(verbose=True)
     app.state.sessions = SessionStore()
+    app.state.feedback = FeedbackStore(get_settings().log_dir)
 
     try:
         logger.info("Index: %d chunk(s) at %s", count_documents(), describe_location())

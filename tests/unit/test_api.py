@@ -7,13 +7,14 @@ model. A test that spends tokens is a test nobody runs.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, ToolMessage
 
-from rag_agent.api import create_app
+from rag_agent.api import FeedbackStore, create_app
 from rag_agent.api.sessions import SessionStore
 from rag_agent.types import AnswerResult, RunMetrics, ToolCall
 
@@ -235,3 +236,89 @@ class TestSessionStore:
 
         assert store.drop("a") is True
         assert store.drop("b") is False
+
+
+class TestFeedback:
+    """The only source of questions the dataset's author did not think of."""
+
+    def test_records_a_verdict(self, client: TestClient) -> None:
+        run_id = client.post("/ask", json={"question": "q"}).json()["run_id"]
+
+        response = client.post("/feedback", json={"run_id": run_id, "useful": False})
+
+        assert response.status_code == 200
+        assert response.json() == {"recorded": True, "run_id": run_id}
+
+    def test_every_answer_carries_an_id_to_point_at(self, client: TestClient) -> None:
+        first = client.post("/ask", json={"question": "a"}).json()["run_id"]
+        second = client.post("/ask", json={"question": "b"}).json()["run_id"]
+
+        assert first and second
+        assert first != second
+
+    @pytest.mark.parametrize(
+        "payload",
+        [{}, {"useful": True}, {"run_id": "x"}, {"run_id": "", "useful": True}],
+    )
+    def test_rejects_an_incomplete_body(self, client: TestClient, payload: dict[str, Any]) -> None:
+        assert client.post("/feedback", json=payload).status_code == 422
+
+    def test_it_accepts_a_comment(self, client: TestClient) -> None:
+        response = client.post(
+            "/feedback",
+            json={"run_id": "abc", "useful": False, "comment": "citou o artigo errado"},
+        )
+
+        assert response.status_code == 200
+
+
+class TestFeedbackStore:
+    def test_writes_one_line_per_entry(self, tmp_path: Path) -> None:
+        store = FeedbackStore(tmp_path)
+
+        store.record({"run_id": "a", "useful": True})
+        store.record({"run_id": "b", "useful": False})
+
+        assert len(store.read_all()) == 2
+
+    def test_stamps_the_moment_it_arrived(self, tmp_path: Path) -> None:
+        store = FeedbackStore(tmp_path)
+
+        store.record({"run_id": "a", "useful": True})
+
+        assert store.read_all()[0]["recorded_at"]
+
+    def test_creates_the_directory_it_needs(self, tmp_path: Path) -> None:
+        store = FeedbackStore(tmp_path / "nao" / "existe")
+
+        store.record({"run_id": "a", "useful": True})
+
+        assert store.path.is_file()
+
+    def test_reading_an_empty_store_is_not_an_error(self, tmp_path: Path) -> None:
+        assert FeedbackStore(tmp_path).read_all() == []
+
+    def test_it_singles_out_the_rejected_answers(self, tmp_path: Path) -> None:
+        """Those are the candidates for new evaluation cases."""
+        store = FeedbackStore(tmp_path)
+        store.record({"run_id": "a", "useful": True})
+        store.record({"run_id": "b", "useful": False})
+        store.record({"run_id": "c", "useful": False})
+
+        assert [entry["run_id"] for entry in store.unhelpful()] == ["b", "c"]
+
+    def test_concurrent_writes_do_not_interleave(self, tmp_path: Path) -> None:
+        """Uvicorn serves sync endpoints from a thread pool."""
+        import threading
+
+        store = FeedbackStore(tmp_path)
+        threads = [
+            threading.Thread(target=store.record, args=({"run_id": str(n), "useful": True},))
+            for n in range(20)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(store.read_all()) == 20

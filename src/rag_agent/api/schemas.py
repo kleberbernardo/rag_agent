@@ -51,6 +51,8 @@ class AnswerResponse(BaseModel):
     sources: list[str]
     tools_used: list[ToolCallResponse]
     metrics: MetricsResponse | None
+    run_id: str
+    """Identifies this answer, so feedback can point back at it."""
     session_id: str | None = None
     trace: str | None = None
 
@@ -60,6 +62,7 @@ class AnswerResponse(BaseModel):
         result: AnswerResult,
         *,
         sources: list[str],
+        run_id: str,
         session_id: str | None = None,
         trace: str | None = None,
     ) -> AnswerResponse:
@@ -71,9 +74,23 @@ class AnswerResponse(BaseModel):
                 for call in result.tool_calls
             ],
             metrics=_metrics(result),
+            run_id=run_id,
             session_id=session_id,
             trace=trace,
         )
+
+
+class FeedbackRequest(BaseModel):
+    """A verdict on one answer, tied to the run that produced it."""
+
+    run_id: str = Field(min_length=1, max_length=64)
+    useful: bool
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class FeedbackResponse(BaseModel):
+    recorded: bool
+    run_id: str
 
 
 class HealthResponse(BaseModel):

@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from rag_agent.agent import ask, format_trace
+from rag_agent.api.feedback import FeedbackStore
 from rag_agent.api.schemas import (
     AnswerResponse,
     AskRequest,
     ChatRequest,
+    FeedbackRequest,
+    FeedbackResponse,
     HealthResponse,
     StatusResponse,
 )
@@ -41,7 +45,14 @@ def get_sessions(request: Request) -> SessionStore:
 # Annotated rather than a default value: it keeps the dependency out of the
 # function signature's defaults, which is both the current FastAPI style and
 # what stops the linter flagging a call in a default argument.
+def get_feedback(request: Request) -> FeedbackStore:
+    """The feedback store lives on the app, like the session store."""
+    store: FeedbackStore = request.app.state.feedback
+    return store
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+FeedbackDep = Annotated[FeedbackStore, Depends(get_feedback)]
 SessionsDep = Annotated[SessionStore, Depends(get_sessions)]
 
 
@@ -95,6 +106,7 @@ def ask_once(payload: AskRequest) -> AnswerResponse:
     return AnswerResponse.from_result(
         result,
         sources=extract_retrieved_sources(result.messages),
+        run_id=uuid4().hex,
         trace=format_trace(result.messages) if payload.trace else None,
     )
 
@@ -115,6 +127,7 @@ def chat(payload: ChatRequest, sessions: SessionsDep) -> AnswerResponse:
     return AnswerResponse.from_result(
         result,
         sources=extract_retrieved_sources(result.messages),
+        run_id=uuid4().hex,
         session_id=session_id,
         trace=format_trace(result.messages) if payload.trace else None,
     )
@@ -125,6 +138,19 @@ def end_chat(session_id: str, sessions: SessionsDep) -> None:
     """Forget a conversation."""
     if not sessions.drop(session_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada.")
+
+
+@router.post("/feedback", response_model=FeedbackResponse, tags=["agent"])
+def record_feedback(payload: FeedbackRequest, feedback: FeedbackDep) -> FeedbackResponse:
+    """Record what someone thought of an answer.
+
+    The run_id comes from the answer being judged. Nothing validates that it
+    corresponds to a real run: rejecting unknown ids would mean keeping every
+    answer in memory, and the cost of an occasional stray entry is lower than
+    the cost of that.
+    """
+    feedback.record(payload.model_dump())
+    return FeedbackResponse(recorded=True, run_id=payload.run_id)
 
 
 def _require_index() -> None:

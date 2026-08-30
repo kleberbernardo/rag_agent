@@ -8,9 +8,10 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from rag_agent.agent.service import ask
-from rag_agent.config import get_settings
+from rag_agent.evaluation.configuration import RunConfiguration, capture_configuration
 from rag_agent.evaluation.dataset import EvalCase
 from rag_agent.evaluation.metrics import CaseScore, error_score, score_case
 
@@ -41,9 +42,15 @@ class EvalReport:
 
     scores: list[CaseScore] = field(default_factory=list)
     started_at: str = ""
-    model: str = ""
-    embedding_model: str = ""
-    retrieval_k: int = 0
+    configuration: RunConfiguration | None = None
+
+    @property
+    def model(self) -> str:
+        return self.configuration.model if self.configuration else ""
+
+    @property
+    def retrieval_k(self) -> int:
+        return self.configuration.retrieval_k if self.configuration else 0
 
     @property
     def retrieval_accuracy(self) -> Rate:
@@ -96,12 +103,10 @@ class EvalReport:
         applicable = [value for value in map(pick, self.scores) if value is not None]
         return Rate(sum(applicable), len(applicable))
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "started_at": self.started_at,
-            "model": self.model,
-            "embedding_model": self.embedding_model,
-            "retrieval_k": self.retrieval_k,
+            "configuration": self.configuration.to_dict() if self.configuration else {},
             "summary": {
                 "cases": len(self.scores),
                 "overall": self.overall.percent,
@@ -165,16 +170,13 @@ def build_report(scores: list[CaseScore]) -> EvalReport:
     """Wrap the scores with the configuration that produced them.
 
     A number without the settings behind it cannot be compared to the next
-    run: 80% on gpt-4o-mini and 80% on gpt-4o are not the same result.
+    run: 80% on gpt-4o-mini and 80% on gpt-4o are not the same result, and
+    neither are two runs whose chunking differed.
     """
-    settings = get_settings()
-
     return EvalReport(
         scores=scores,
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
-        model=settings.chat_model,
-        embedding_model=settings.embedding_model,
-        retrieval_k=settings.retrieval_k,
+        configuration=capture_configuration(),
     )
 
 

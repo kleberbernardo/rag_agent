@@ -6,6 +6,8 @@ whether a change to the prompt, the chunking or the model made things better
 or worse.
 """
 
+from rag_agent.evaluation.comparison import CaseChange, Change, Comparison, compare, load_report
+from rag_agent.evaluation.configuration import RunConfiguration, capture_configuration, hash_prompt
 from rag_agent.evaluation.dataset import DEFAULT_DATASET, EvalCase, load_dataset
 from rag_agent.evaluation.metrics import (
     CaseScore,
@@ -19,16 +21,24 @@ from rag_agent.evaluation.runner import EvalReport, Rate, build_report, run_eval
 
 __all__ = [
     "DEFAULT_DATASET",
+    "CaseChange",
     "CaseScore",
+    "Change",
+    "Comparison",
     "EvalCase",
     "EvalReport",
     "Rate",
+    "RunConfiguration",
     "build_report",
+    "capture_configuration",
+    "compare",
     "error_score",
     "extract_retrieved_sources",
     "groundedness",
+    "hash_prompt",
     "is_refusal",
     "load_dataset",
+    "load_report",
     "run_evaluation",
     "save_report",
     "score_case",

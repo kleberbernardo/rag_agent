@@ -6,6 +6,7 @@ that layer free of terminal concerns in the first place.
 """
 
 from rag_agent.api.app import app, create_app
+from rag_agent.api.feedback import FeedbackStore
 from rag_agent.api.sessions import SessionStore
 
-__all__ = ["SessionStore", "app", "create_app"]
+__all__ = ["FeedbackStore", "SessionStore", "app", "create_app"]

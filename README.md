@@ -552,6 +552,7 @@ Interactive documentation, generated from the schemas, at `/docs`.
 | `POST` | `/ask` | One question, no memory |
 | `POST` | `/chat` | A question inside a conversation |
 | `DELETE` | `/chat/{session_id}` | Forget a conversation |
+| `POST` | `/feedback` | Record what someone thought of an answer |
 | `GET` | `/health` | Liveness plus the indexed chunk count |
 | `GET` | `/status` | The active configuration |
 
@@ -609,6 +610,39 @@ second replica, not before.
 
 An unknown `session_id` on `POST /chat` opens a new conversation rather than
 failing: a client holding an id from before a restart should keep working.
+
+---
+
+## Feedback
+
+The evaluation dataset is written by whoever built the system, which means it
+tests the questions that person thought of. Feedback from real use is the only
+source of the ones they did not.
+
+Every answer carries a `run_id`. Send it back with a verdict:
+
+```bash
+curl -X POST localhost:8080/feedback -H "Content-Type: application/json"   -d '{"run_id": "9b8c3a27...", "useful": false, "comment": "citou o artigo errado"}'
+```
+
+Entries are appended to `logs/feedback.jsonl`, one JSON object per line:
+
+```json
+{"recorded_at": "2026-08-30T21:58:08+00:00", "run_id": "9b8c3a27...",
+ "useful": false, "comment": "citou o artigo errado"}
+```
+
+A file rather than a database: it is appended to, readable by any tool, and
+small enough that anything heavier would be infrastructure without a reason.
+
+**What it is for.** The rejected answers are the candidates for new evaluation
+cases. A question the agent got wrong in real use belongs in `dataset.json`,
+and from then on it cannot regress unnoticed. That loop is what keeps the
+suite from testing only what was imagined on the first day.
+
+Nothing validates that a `run_id` belongs to a real answer. Rejecting unknown
+ids would mean holding every answer in memory, and an occasional stray entry
+costs less than that.
 
 ---
 
@@ -716,6 +750,8 @@ the model made things better or worse.
 rag eval                     # the whole suite, ~2 minutes, ~US$ 0.02
 rag eval --limit 5           # a quick sample
 rag eval --min-score 0.90    # fail below 90% instead of below perfect
+rag eval --max-cost 0.05     # fail if the run costs more than expected
+rag eval --compare <report>  # diff against a previous run
 rag eval --dataset my.json   # your own questions
 ```
 
@@ -790,13 +826,59 @@ just as often, because a number legitimately changes form between the document
 and the expression ("500 milhões" becomes `500000000`, "15%" becomes `0.15`).
 A metric that cannot tell right from wrong was dropped rather than shipped.
 
+### Comparing two runs
+
+A directory of reports records what happened. It does not say what changed,
+and reading two JSON files side by side to find out is how a history stops
+being used.
+
+```
+$ rag eval --compare evals/results/20260830-212255.json
+
+comparação com 20260830-212255.json
+  retrieval_k          8 → 4
+  overall              97% → 83%
+  factual_accuracy     96% → 83%
+  quebrado prazo-exigencias-primeiras
+  1 regressão(ões)
+```
+
+Regressions are listed first, because a case that started failing is the one
+worth reading. Above them sits the setting that moved, which is usually the
+answer to why.
+
+Every report records the settings behind it: the model, the embedding model,
+the temperature, both chunking settings, `retrieval_k`, the knowledge domain,
+and a hash of the rendered prompt. The prompt hash matters as much as the
+rest: changing the wording changes the score, and without a fingerprint that
+change leaves no trace.
+
+Reports written before this carry only a few fields, and the comparison says
+so rather than pretending nothing moved.
+
+### Cost ceiling
+
+```bash
+rag eval --max-cost 0.05
+```
+
+Exits non-zero when the run costs more than expected. A prompt that grew
+verbose, or a `retrieval_k` raised too far, shows up here as a number instead
+of as a surprise on the invoice.
+
 ### Evaluation in CI
 
-The suite runs from the Actions tab, not on every push:
+The suite runs from the Actions tab, and once a week on its own:
 
 ```
-Actions → Evaluation → Run workflow → min_score
+Actions → Evaluation → Run workflow → min_score, max_cost, limit
 ```
+
+The weekly run exists because the corpus stops changing but the model does
+not. A provider updating `gpt-4o-mini` underneath a frozen project moves the
+score with no commit to blame, and a run every Monday is how that surfaces.
+Each scheduled run commits its report, so the trend outlives the 30-day
+artifact retention.
 
 Each run reaches the real model, so it costs money and takes minutes. That is
 the wrong trade for a per-push check, and the fast checks in `ci.yml` already
