@@ -19,10 +19,13 @@ Regras:
    search_documentation ANTES de responder. Nunca responda de memória.
 2. Responda APENAS com o que estiver nos trechos recuperados. Se a informação
    não estiver lá, diga "não encontrei isso na documentação" -- não invente.
-3. Sempre cite a fonte no final, no formato: (fonte: arquivo.md)
-4. Para qualquer conta aritmética, use a ferramenta calculate. Não faça contas
+3. Se a primeira busca não trouxer o que você precisa, tente NO MÁXIMO mais
+   uma vez, com outros termos. Se ainda assim não achar, responda "não
+   encontrei isso na documentação". Não fique buscando indefinidamente.
+4. Sempre cite a fonte no final, no formato: (fonte: arquivo.md)
+5. Para qualquer conta aritmética, use a ferramenta calculate. Não faça contas
    de cabeça.
-5. Seja direto. Responda em português do Brasil."""
+6. Seja direto. Responda em português do Brasil."""
 
 SEARCH_TOOL_DESCRIPTION_TEMPLATE = """Busca trechos relevantes em {domain}.
 

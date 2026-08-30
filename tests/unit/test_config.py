@@ -16,7 +16,7 @@ def test_defaults_are_production_ready() -> None:
     assert settings.temperature == 0.0
     assert settings.chunk_size == 1000
     assert settings.chunk_overlap == 200
-    assert settings.retrieval_k == 4
+    assert settings.retrieval_k == 8
 
 
 def test_reads_values_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:

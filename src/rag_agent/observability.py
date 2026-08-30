@@ -50,6 +50,12 @@ def _client() -> Any | None:
 
 RUN_NAME = "rag.ask"
 
+# Without a cap, a question the agent cannot satisfy makes it search again and
+# again, each round adding passages to the history until the context window
+# overflows and the whole call dies. Ten steps is well past any legitimate
+# search-then-answer loop.
+RECURSION_LIMIT = 10
+
 
 def build_callbacks() -> list[Any]:
     """Callbacks to hand to the agent. Empty when tracing is off."""
@@ -73,7 +79,11 @@ def build_run_config(*, session_id: str) -> dict[str, Any]:
     The metadata records which settings produced the run, so a trace from last
     week still explains itself.
     """
-    config: dict[str, Any] = {"callbacks": build_callbacks(), "run_name": RUN_NAME}
+    config: dict[str, Any] = {
+        "callbacks": build_callbacks(),
+        "run_name": RUN_NAME,
+        "recursion_limit": RECURSION_LIMIT,
+    }
 
     if _client() is None:
         return config

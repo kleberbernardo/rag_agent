@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=1000, gt=0)
     chunk_overlap: int = Field(default=200, ge=0)
 
-    retrieval_k: int = Field(default=4, gt=0)
+    # 8 rather than 4: the evaluation suite scored 82% at k=4 and 93% at k=8
+    # on the same dataset. The corpus has many near-identical clauses, so a
+    # narrow window keeps landing on the neighbouring deadline.
+    retrieval_k: int = Field(default=8, gt=0)
 
     knowledge_domain: str = Field(default="a documentação interna da organização", min_length=3)
     """What the knowledge base is about, in the language of the answers.

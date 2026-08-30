@@ -8,13 +8,25 @@ rag status              inspect the current configuration and index
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.table import Table
 
 from rag_agent.agent import ChatSession, ask, format_trace
-from rag_agent.config import get_settings
+from rag_agent.config import PROJECT_ROOT, get_settings
+from rag_agent.evaluation import (
+    DEFAULT_DATASET,
+    CaseScore,
+    EvalReport,
+    build_report,
+    load_dataset,
+    run_evaluation,
+    save_report,
+)
 from rag_agent.indexing import (
     VectorStoreUnavailableError,
     count_documents,
@@ -38,6 +50,9 @@ _EXIT_WORDS = frozenset({"sair", "exit", "quit"})
 
 VerboseOption = typer.Option(False, "--verbose", "-v", help="Mostra logs detalhados.")
 TraceOption = typer.Option(False, "--trace", "-t", help="Mostra o raciocínio do agente.")
+DatasetOption = typer.Option(DEFAULT_DATASET, "--dataset", "-d", help="Arquivo do dataset.")
+LimitOption = typer.Option(0, "--limit", "-n", help="Roda apenas os N primeiros casos.")
+SaveOption = typer.Option(True, "--save/--no-save", help="Grava o relatório em evals/results.")
 
 
 @app.command()
@@ -138,6 +153,83 @@ def status() -> None:
         f"[bold]índice      [/] {settings.vector_store_mode.value} · {describe_location()}"
     )
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
+
+
+@app.command(name="eval")
+def eval_command(
+    dataset: Path = DatasetOption,
+    limit: int = LimitOption,
+    save: bool = SaveOption,
+    verbose: bool = VerboseOption,
+) -> None:
+    """Mede o agente contra perguntas cuja resposta é conhecida."""
+    setup_logging(verbose=verbose)
+    _require_index()
+
+    cases = load_dataset(dataset)
+    if limit > 0:
+        cases = cases[:limit]
+
+    scores: list[CaseScore] = []
+    with console.status(f"[cyan]Avaliando {len(cases)} caso(s)...") as spinner:
+        for score in run_evaluation(cases):
+            scores.append(score)
+            spinner.update(f"[cyan]Avaliando... {len(scores)}/{len(cases)} · {score.case_id}")
+            console.print(
+                f"  {'[green]PASS[/]' if score.passed else '[red]FAIL[/]'} {score.case_id}"
+            )
+
+    report = build_report(scores)
+    _render_report(report)
+
+    if save:
+        path = save_report(report, PROJECT_ROOT / "evals" / "results")
+        console.print(f"[dim]relatório salvo em {path}")
+
+    # Non-zero exit makes the suite usable as a gate in CI or a pre-release check.
+    if report.failures:
+        raise typer.Exit(code=1)
+
+
+def _render_report(report: EvalReport) -> None:
+    """Print the summary, then the failures, because failures are the point."""
+    table = Table(title="avaliação", border_style="cyan")
+    table.add_column("métrica")
+    table.add_column("resultado", justify="right")
+    table.add_column("o que mede", style="dim")
+
+    table.add_row("retrieval", report.retrieval_accuracy.percent, "trouxe o documento certo")
+    table.add_row("citação", report.citation_accuracy.percent, "citou a fonte certa")
+    table.add_row("fato", report.factual_accuracy.percent, "o número ou termo esperado apareceu")
+    table.add_row("recusa", report.refusal_accuracy.percent, "admitiu não saber, fora do corpus")
+    table.add_row("geral", report.overall.percent, "passou em tudo que se aplicava")
+    console.print(table)
+
+    console.print(
+        f"[dim]{report.model} · k={report.retrieval_k} · "
+        f"mediana {report.median_latency:.2f}s · "
+        f"{report.total_tokens} tokens · ~US$ {report.total_cost_usd:.4f}"
+    )
+
+    if not report.failures:
+        return
+
+    console.print(f"\n[red]{len(report.failures)} falha(s):")
+    for score in report.failures:
+        console.print(f"\n[bold]{score.case_id}[/] — {escape(score.question)}")
+        if score.error:
+            console.print(f"  [red]erro:[/] {escape(score.error[:160])}")
+            continue
+        console.print(f"  [dim]recuperou:[/] {', '.join(score.retrieved_sources) or 'nada'}")
+        console.print(f"  [dim]respondeu:[/] {escape(score.answer[:180])}")
+        for label, value in (
+            ("retrieval", score.retrieval_hit),
+            ("citação", score.citation_correct),
+            ("fato", score.facts_present),
+            ("recusa", score.refusal_correct),
+        ):
+            if value is False:
+                console.print(f"  [red]falhou em {label}")
 
 
 def _require_index() -> None:

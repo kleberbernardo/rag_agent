@@ -21,6 +21,8 @@ says so instead of inventing one.
   cost, with optional full tracing to Langfuse.
 - **Domain-agnostic** — the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
+- **Evaluated** — 28 graded questions, including ones the corpus cannot answer.
+  Currently 93%.
 
 ---
 
@@ -217,7 +219,7 @@ rather than failing mid-query.
 | `TEMPERATURE` | `0.0` | `0` is deterministic — what you want for grounded answers. |
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
-| `RETRIEVAL_K` | `4` | Passages retrieved per question. |
+| `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
 | `LOG_DIR` | `logs/` | Where the log file is written. |
@@ -344,7 +346,8 @@ src/rag_agent/
 ├── cli.py             presentation only, no domain logic
 ├── indexing/          loader · splitter · vector_store
 ├── tools/             one module per tool, registered in build_tools()
-└── agent/             service (build + orchestration) · trace
+├── agent/             service (build + orchestration) · trace
+└── evaluation/        dataset · metrics · runner
 ```
 
 Only three directories, and each earns it: `indexing/` grows with every new
@@ -446,6 +449,73 @@ deciding to `calculate` before it has read the retrieved passage. The answer
 can still come out right while the number came from the model's memory rather
 than from the document. In the terminal that is easy to miss. In a trace, the
 two calls hanging off the same model call make it obvious.
+
+---
+
+## Evaluation
+
+Unit tests prove the code does what it was written to do. They say nothing
+about whether the agent answers correctly. That is a different question, and
+the only one that tells you whether a change to the prompt, the chunking or
+the model made things better or worse.
+
+```bash
+rag eval                    # the whole suite, ~2 minutes, ~US$ 0.02
+rag eval --limit 5          # a quick sample
+rag eval --dataset my.json  # your own questions
+```
+
+```
+                           avaliação
+┌───────────┬───────────┬─────────────────────────────────────┐
+│ métrica   │ resultado │ o que mede                          │
+├───────────┼───────────┼─────────────────────────────────────┤
+│ retrieval │      100% │ trouxe o documento certo            │
+│ citação   │      100% │ citou a fonte certa                 │
+│ fato      │       92% │ o número ou termo esperado apareceu │
+│ recusa    │      100% │ admitiu não saber, fora do corpus   │
+│ geral     │       93% │ passou em tudo que se aplicava      │
+└───────────┴───────────┴─────────────────────────────────────┘
+gpt-4o-mini · k=8 · mediana 2.35s · 109821 tokens · ~US$ 0.0177
+```
+
+Failures print with the answer, the documents retrieved and which metric broke,
+and the command exits non-zero so it can gate a release. Reports land in
+`evals/results/` stamped with the model, the embedding model and `retrieval_k`
+— a score without its configuration cannot be compared to the next run.
+
+### The dataset
+
+`evals/dataset.json` holds 28 questions: 24 answerable and **4 deliberately
+outside the corpus**. The out-of-corpus cases are the important ones. They
+measure whether the agent admits ignorance instead of inventing, which nothing
+else in the project can catch.
+
+Every fact was extracted from the indexed PDFs, not written from memory.
+
+### Every metric is deterministic
+
+No second model grades the answers. A language model used as a judge drifts
+between runs, and a suite you cannot trust is worse than none. The four metrics
+are string and set operations: same answer, same score, no extra cost.
+
+The trade-off is honest: `retrieval` checks that the right *document* came
+back, not the right *passage*. In a 143-page regulation full of near-identical
+deadlines, that is a coarse instrument — which is exactly what the failures
+below exposed.
+
+### What it found
+
+Running it for the first time paid for itself immediately:
+
+| Finding | Fix | Result |
+|---|---|---|
+| Right document, wrong deadline — 5 cases where the answer cited the correct file with the wrong number | `RETRIEVAL_K` 4 → 8 | 82% → 86% |
+| The agent never stopped searching for an answer that was not there, until the context window overflowed and killed the whole run | A rule capping retries, plus `recursion_limit` on the graph | 86% → 93% |
+| One failing case aborted the entire suite | Per-case error isolation in the runner | The other 27 results survive |
+
+The first is the dangerous one: a wrong number with a correct citation looks
+more trustworthy than a wrong number alone.
 
 ---
 

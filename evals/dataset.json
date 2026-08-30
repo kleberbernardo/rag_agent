@@ -1,0 +1,362 @@
+{
+  "name": "cvm-regulacao-v1",
+  "description": "Perguntas verificadas contra o texto das resolucoes indexadas em data/. Os fatos foram extraidos dos PDFs, nao redigidos de memoria.",
+  "cases": [
+    {
+      "id": "lote-suplementar",
+      "question": "Qual o percentual maximo do lote suplementar em uma oferta publica?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "15"
+      ],
+      "reference_answer": "O lote suplementar nao pode ultrapassar 15% da quantidade inicialmente ofertada.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "lote-adicional",
+      "question": "Ate quanto pode ser aumentada a quantidade de valores mobiliarios no lote adicional?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "25"
+      ],
+      "reference_answer": "O lote adicional pode aumentar a quantidade em ate 25% da quantidade inicialmente requerida.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prazo-analise-sre",
+      "question": "Em quantos dias a SRE deve concluir a analise do requerimento de registro da oferta?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "60"
+      ],
+      "reference_answer": "A SRE deve concluir a analise no prazo maximo de 60 dias, contado do protocolo de todos os documentos.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prazo-suficiencia",
+      "question": "Em quanto tempo a SRE informa se os documentos submetidos sao suficientes?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "10"
+      ],
+      "reference_answer": "A SRE deve informar em ate 10 dias contados do protocolo.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prazo-exigencias",
+      "question": "Qual o prazo para atendimento das exigencias formuladas pela SRE?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "40"
+      ],
+      "reference_answer": "O prazo para atendimento das exigencias e de 40 dias uteis.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prorrogacao-exigencias",
+      "question": "O prazo para cumprir exigencias pode ser prorrogado? Por quanto tempo?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "20"
+      ],
+      "reference_answer": "Pode ser prorrogado uma unica vez, por periodo nao superior a 20 dias uteis, mediante pedido fundamentado.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "caducidade-registro",
+      "question": "Em quanto tempo caduca o registro de distribuicao se o anuncio de inicio nao for divulgado?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "90"
+      ],
+      "reference_answer": "O registro caduca se o anuncio de inicio e o prospecto definitivo nao forem divulgados em ate 90 dias apos o deferimento.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "anuncio-inicio",
+      "question": "Com prospecto preliminar, em quantos dias uteis o anuncio de inicio deve ser divulgado?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "2"
+      ],
+      "reference_answer": "Em ate 2 dias uteis apos a concessao do registro.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "suspensao-oferta",
+      "question": "Qual o prazo maximo de suspensao de uma oferta publica?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "30"
+      ],
+      "reference_answer": "A suspensao nao pode ser superior a 30 dias, durante os quais a irregularidade deve ser sanada.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "interrupcao-analise",
+      "question": "O ofertante pode pedir para interromper a analise do registro? Por quanto tempo?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "60"
+      ],
+      "reference_answer": "Sim, uma unica vez, por ate 60 dias uteis, em conjunto com o coordenador lider.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "consulta-sigilosa",
+      "question": "E permitido consultar investidores antes de protocolar o pedido de registro?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "sigilosa"
+      ],
+      "reference_answer": "Sim. E permitida a consulta sigilosa a potenciais investidores profissionais mesmo antes do protocolo, para apurar viabilidade ou interesse.",
+      "tags": [
+        "procedimento"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "desistencia-modificacao",
+      "question": "Se a oferta for modificada, quanto tempo o investidor tem para desistir?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "5"
+      ],
+      "reference_answer": "Prazo minimo de 5 dias uteis contados da comunicacao; o silencio presume manutencao da adesao.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "prorrogacao-distribuicao",
+      "question": "Apos uma modificacao deferida, por quanto tempo o prazo de distribuicao pode ser prorrogado?",
+      "expected_source": "cvm-resolucao-160-ofertas-publicas.pdf",
+      "expected_facts": [
+        "90"
+      ],
+      "reference_answer": "Por ate 90 dias, uma unica vez, por iniciativa da SRE ou a requerimento do ofertante.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "garantia-financiamento",
+      "question": "Qual a garantia minima exigida no financiamento para compra de acoes?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "140"
+      ],
+      "reference_answer": "A caucao das acoes adquiridas, somada a outras garantias, deve representar no minimo 140% do valor do financiamento.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "reforco-garantia",
+      "question": "Em quanto tempo o cliente deve atender a um pedido de reforco de garantia?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "2"
+      ],
+      "reference_answer": "No prazo maximo de 2 dias uteis contados da ocorrencia da desvalorizacao, sob pena de rescisao imediata do contrato.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "troca-diretor",
+      "question": "Em quantos dias a substituicao de diretores estatutarios deve ser informada a CVM?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "7"
+      ],
+      "reference_answer": "No prazo de 7 dias uteis.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "quem-pode-financiar",
+      "question": "Quem pode conceder financiamento para compra de acoes e emprestimo de acoes?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "corretoras"
+      ],
+      "reference_answer": "Somente sociedades corretoras e distribuidoras de valores mobiliarios.",
+      "tags": [
+        "competencia"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "mesma-corretora",
+      "question": "O financiamento e a compra das acoes podem ser feitos por corretoras diferentes?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "mesma"
+      ],
+      "reference_answer": "Nao. O financiamento e a correspondente aquisicao devem ser efetivados pela mesma sociedade corretora ou distribuidora.",
+      "tags": [
+        "procedimento"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "cadastro-unificado",
+      "question": "O intermediario pode usar cadastro unificado?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "conglomerado"
+      ],
+      "reference_answer": "Sim, e facultado ao intermediario usar cadastro unificado caso integre um conglomerado financeiro.",
+      "tags": [
+        "procedimento"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "garantia-emprestimo",
+      "question": "Qual a garantia minima no emprestimo de acoes?",
+      "expected_source": "cvm-resolucao-35-adequacao-de-produtos.pdf",
+      "expected_facts": [
+        "140"
+      ],
+      "reference_answer": "A garantia total deve representar no minimo 140% do valor das acoes emprestadas.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "negociacao-relevante",
+      "question": "A partir de que patamar de participacao uma negociacao e considerada relevante?",
+      "expected_source": "cvm-resolucao-44-informacoes-relevantes.pdf",
+      "expected_facts": [
+        "5"
+      ],
+      "reference_answer": "Quando a participacao ultrapassa, para cima ou para baixo, os patamares de 5%, 10%, 15% e assim sucessivamente.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "alteracao-informacoes",
+      "question": "Em quantos dias uma alteracao nas informacoes deve ser comunicada a companhia?",
+      "expected_source": "cvm-resolucao-44-informacoes-relevantes.pdf",
+      "expected_facts": [
+        "15"
+      ],
+      "reference_answer": "No prazo de ate 15 dias contados da data da alteracao.",
+      "tags": [
+        "prazo"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "excecao-divulgacao",
+      "question": "Um fato relevante pode deixar de ser divulgado?",
+      "expected_source": "cvm-resolucao-44-informacoes-relevantes.pdf",
+      "expected_facts": [
+        "interesse"
+      ],
+      "reference_answer": "Excepcionalmente sim, se os controladores ou administradores entenderem que a revelacao porá em risco interesse legitimo da companhia.",
+      "tags": [
+        "excecao"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "derivativos-excluidos",
+      "question": "Derivativos com que peso das acoes da companhia ficam fora da regra?",
+      "expected_source": "cvm-resolucao-44-informacoes-relevantes.pdf",
+      "expected_facts": [
+        "20"
+      ],
+      "reference_answer": "Instrumentos nos quais as acoes da companhia tenham peso inferior a 20% ficam de fora.",
+      "tags": [
+        "percentual"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "fora-ir-daytrade",
+      "question": "Qual a aliquota de imposto de renda sobre operacoes de day trade?",
+      "expected_source": null,
+      "expected_facts": [],
+      "reference_answer": "Nao esta na base indexada.",
+      "tags": [
+        "fora-do-escopo"
+      ],
+      "answerable": false
+    },
+    {
+      "id": "fora-horario-pregao",
+      "question": "Qual o horario de funcionamento do pregao da B3?",
+      "expected_source": null,
+      "expected_facts": [],
+      "reference_answer": "Nao esta na base indexada.",
+      "tags": [
+        "fora-do-escopo"
+      ],
+      "answerable": false
+    },
+    {
+      "id": "fora-taxa-custodia",
+      "question": "Quanto custa a taxa de custodia do Tesouro Direto?",
+      "expected_source": null,
+      "expected_facts": [],
+      "reference_answer": "Nao esta na base indexada.",
+      "tags": [
+        "fora-do-escopo"
+      ],
+      "answerable": false
+    },
+    {
+      "id": "fora-abrir-conta",
+      "question": "Como faco para abrir conta em uma corretora?",
+      "expected_source": null,
+      "expected_facts": [],
+      "reference_answer": "Nao esta na base indexada.",
+      "tags": [
+        "fora-do-escopo"
+      ],
+      "answerable": false
+    }
+  ]
+}
