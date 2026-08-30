@@ -24,7 +24,7 @@ from rag_agent.indexing import (
     split_documents,
 )
 from rag_agent.logging_setup import setup_logging
-from rag_agent.types import AnswerResult
+from rag_agent.types import AnswerResult, RunMetrics
 
 app = typer.Typer(
     add_completion=False,
@@ -116,6 +116,8 @@ def chat(trace: bool = TraceOption, verbose: bool = VerboseOption) -> None:
         console.print(f"[bold green]agente[/] > {escape(result.answer)}")
         if trace:
             console.print(f"[dim]ferramentas: {', '.join(result.tool_names) or 'nenhuma'}")
+            if result.metrics:
+                console.print(f"[dim]{_format_metrics(result.metrics)}")
 
 
 @app.command()
@@ -173,6 +175,23 @@ def _render(result: AnswerResult, *, show_trace: bool) -> None:
 
     if result.used_tools:
         console.print(f"[dim]ferramentas usadas: {', '.join(result.tool_names)}")
+
+    if result.metrics:
+        console.print(f"[dim]{_format_metrics(result.metrics)}")
+
+
+def _format_metrics(metrics: RunMetrics) -> str:
+    """One line of usage: what the run took and what it cost."""
+    parts = [
+        f"{metrics.latency_seconds:.2f}s",
+        f"{metrics.total_tokens} tokens ({metrics.input_tokens} in / {metrics.output_tokens} out)",
+        f"{metrics.tool_calls} tool call(s)",
+    ]
+    # An unlisted model yields no estimate; showing nothing beats showing a
+    # number that looks authoritative and is wrong.
+    if metrics.estimated_cost_usd is not None:
+        parts.append(f"~US$ {metrics.estimated_cost_usd:.5f}")
+    return " · ".join(parts)
 
 
 if __name__ == "__main__":

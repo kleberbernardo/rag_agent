@@ -17,6 +17,8 @@ says so instead of inventing one.
   different terms, and can reach for other tools.
 - **Local index** — the vector store is an embedded database on disk. No server
   to run, or point it at a standalone Chroma with one variable.
+- **Measured** — every answer reports its latency, token usage and estimated
+  cost.
 - **Domain-agnostic** — the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
 
@@ -153,7 +155,15 @@ $ rag ask "qual o percentual maximo do lote suplementar numa oferta publica?
 │ milhões, isso representa R$ 75 milhões.                       │
 │ (fonte: cvm-resolucao-160-ofertas-publicas.pdf)               │
 ╰───────────────────────────────────────────────────────────────╯
+ferramentas usadas: search_documentation, calculate
+4.82s · 1788 tokens (1635 in / 153 out) · 2 tool call(s) · ~US$ 0.00034
 ```
+
+Every answer closes with what it cost: wall-clock latency, tokens split
+between input and output, how many tools ran, and an estimated price. It is
+measured locally from the provider's own usage reporting — no account, no
+external service. A model with no listed price shows no estimate rather than a
+confident wrong number.
 
 The agent did not do the arithmetic itself — it delegated the multiplication
 to the calculator, and cited the page it took the limit from.

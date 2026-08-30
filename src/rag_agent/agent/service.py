@@ -7,15 +7,18 @@ a scheduled job or a bot a thin wrapper instead of a rewrite.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+from rag_agent.config import get_settings
+from rag_agent.pricing import estimate_cost_usd
 from rag_agent.prompts import build_system_prompt
 from rag_agent.providers import build_chat_model
 from rag_agent.tools import build_tools
-from rag_agent.types import AnswerResult, ToolCall
+from rag_agent.types import AnswerResult, RunMetrics, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +60,41 @@ class ChatSession:
     def send(self, question: str) -> AnswerResult:
         """Send a question, updating the conversation history in place."""
         self._messages.append(HumanMessage(question))
+        # Everything after this mark belongs to the current turn. Measuring
+        # from here is what keeps earlier turns from being counted twice.
+        turn_start = len(self._messages)
 
+        started = time.perf_counter()
         state = self._agent.invoke({"messages": self._messages})
-        self._messages = state["messages"]
+        elapsed = time.perf_counter() - started
 
-        result = _to_result(self._messages)
-        logger.info("ask(%r) used %d tool(s)", question, len(result.tool_calls))
+        self._messages = state["messages"]
+        produced = self._messages[turn_start:]
+
+        result = _to_result(self._messages, produced, elapsed)
+        logger.info(
+            "ask(%r) used %d tool(s) in %.2fs, %d token(s)",
+            question,
+            len(result.tool_calls),
+            elapsed,
+            result.metrics.total_tokens if result.metrics else 0,
+        )
         return result
 
 
-def _to_result(messages: list[BaseMessage]) -> AnswerResult:
+def _to_result(
+    messages: list[BaseMessage],
+    produced: list[BaseMessage],
+    elapsed: float,
+) -> AnswerResult:
     """Turn the raw message list into the typed result callers expect."""
+    tool_calls = _extract_tool_calls(produced)
+
     return AnswerResult(
         answer=str(messages[-1].content) if messages else "",
-        tool_calls=_extract_tool_calls(messages),
+        tool_calls=tool_calls,
         messages=list(messages),
+        metrics=_collect_metrics(produced, tool_calls, elapsed),
     )
 
 
@@ -82,3 +105,31 @@ def _extract_tool_calls(messages: list[BaseMessage]) -> list[ToolCall]:
         if isinstance(message, AIMessage) and message.tool_calls
         for call in message.tool_calls
     ]
+
+
+def _collect_metrics(
+    produced: list[BaseMessage],
+    tool_calls: list[ToolCall],
+    elapsed: float,
+) -> RunMetrics:
+    """Sum the provider's own usage reporting across this turn's model calls."""
+    input_tokens = 0
+    output_tokens = 0
+
+    for message in produced:
+        usage = getattr(message, "usage_metadata", None)
+        if not usage:
+            continue
+        input_tokens += usage.get("input_tokens", 0)
+        output_tokens += usage.get("output_tokens", 0)
+
+    model = get_settings().chat_model
+
+    return RunMetrics(
+        latency_seconds=elapsed,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        tool_calls=len(tool_calls),
+        model=model,
+        estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
+    )
