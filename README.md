@@ -1,5 +1,9 @@
 # RAG Agent
 
+[![CI](https://github.com/kleberbernardo/rag_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/kleberbernardo/rag_agent/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A command-line AI agent that answers questions about your own documents.
 
 Point it at a folder of files, run the ingestion, and ask questions in plain
@@ -341,6 +345,11 @@ pytest -k calculator            # filter by name
 ruff check . && ruff format .   # lint and format
 mypy                            # type check
 ```
+
+Every push runs the same four checks on Ubuntu and Windows through GitHub
+Actions (`.github/workflows/ci.yml`). Integration tests are excluded there: a
+public repository has no business holding an API key, and every push would
+spend tokens.
 
 Unit tests cover the pure logic — chunking, the calculator, settings, the
 service loop with a fake model — and need no API key. Tests marked

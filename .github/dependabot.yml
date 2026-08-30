@@ -1,0 +1,20 @@
+version: 2
+
+updates:
+  # A portfolio repository sits idle between visits. Monthly is enough to keep
+  # it from rotting without turning the inbox into a pull request feed.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      langchain:
+        patterns:
+          - "langchain*"
+          - "langgraph*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

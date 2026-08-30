@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push makes an in-flight run pointless: cancel it instead of
+# queueing both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report every platform's result instead of stopping at the first
+      # failure: a Windows-only break is exactly what this matrix is for.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: mypy
+
+      # Integration tests reach the real embeddings API. They stay out of CI:
+      # a public repository has no business holding an API key, and every
+      # push would cost tokens.
+      - name: Tests
+        run: pytest -m "not integration" --cov=rag_agent --cov-report=term-missing
