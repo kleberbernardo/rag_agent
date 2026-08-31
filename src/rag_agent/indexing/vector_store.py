@@ -13,7 +13,8 @@ import logging
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from rag_agent.config import Settings, VectorStoreMode, get_settings
+from rag_agent.config import SearchStrategy, Settings, VectorStoreMode, get_settings
+from rag_agent.indexing.hybrid import FUSION_POOL, forget_keyword_index, fuse, keyword_index
 from rag_agent.providers import build_embeddings
 from rag_agent.types import SearchHit
 
@@ -42,20 +43,56 @@ def index_documents(chunks: list[Document]) -> int:
     store = get_vector_store()
     store.add_documents(documents=chunks, ids=[_stable_id(chunk) for chunk in chunks])
 
+    # The keyword index is a copy of what is stored, so it goes stale the
+    # moment the store changes.
+    forget_keyword_index()
+
     logger.info("Indexed %d chunk(s) in %s", len(chunks), describe_location())
     return len(chunks)
 
 
 def search(query: str, k: int | None = None) -> list[SearchHit]:
-    """Return the k chunks closest in meaning to the query.
+    """Return the k chunks most relevant to the query.
 
-    Smaller distance means closer. The query is embedded by the same model
-    used at indexing time, which is what makes the comparison meaningful.
+    In `vector` mode this is nearest-neighbour on the embedding, and the hits
+    carry their distance. In `hybrid` mode a keyword ranking is fused with it,
+    and the distance is no longer meaningful for the fused list: two rankings
+    are merged by position, not by score, because a cosine distance and a BM25
+    score are not on the same scale.
     """
-    limit = get_settings().retrieval_k if k is None else k
-    results = get_vector_store().similarity_search_with_score(query, k=limit)
+    settings = get_settings()
+    limit = settings.retrieval_k if k is None else k
 
-    return [SearchHit(document=document, distance=distance) for document, distance in results]
+    if settings.search_strategy is SearchStrategy.VECTOR:
+        scored = get_vector_store().similarity_search_with_score(query, k=limit)
+        return [SearchHit(document=document, distance=distance) for document, distance in scored]
+
+    pool = limit * FUSION_POOL
+    scored = get_vector_store().similarity_search_with_score(query, k=pool)
+
+    index = keyword_index()
+    if index is None:
+        return [
+            SearchHit(document=document, distance=distance) for document, distance in scored[:limit]
+        ]
+
+    by_vector = [document for document, _ in scored]
+    distances = {_identity(document): distance for document, distance in scored}
+
+    fused = fuse([by_vector, index.rank(query, pool)], limit=limit)
+
+    # A document the keyword search contributed has no distance of its own.
+    # Reporting the worst seen keeps the field honest rather than inventing a
+    # number that would read as a similarity.
+    fallback = max(distances.values(), default=0.0)
+    return [
+        SearchHit(document=document, distance=distances.get(_identity(document), fallback))
+        for document in fused
+    ]
+
+
+def _identity(document: Document) -> str:
+    return f"{document.metadata.get('source', '')}::{document.page_content}"
 
 
 def count_documents() -> int:
@@ -73,6 +110,7 @@ def reset_index() -> None:
     """
     store = get_vector_store()
     store.delete_collection()
+    forget_keyword_index()
     logger.info("Cleared the index at %s", describe_location())
 
 

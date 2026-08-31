@@ -22,7 +22,8 @@ says so instead of inventing one.
 - **Domain-agnostic**: the subject lives in configuration, not in code. Swap
   the folder, change one variable, re-ingest.
 - **Evaluated**: 29 graded questions, including ones the corpus cannot answer.
-  Currently 97%.
+  Currently 100%, with the caveat that one of the six metrics is model-graded
+  and drifts.
 - **Two interfaces**: a CLI and an HTTP API over the same service layer, both
   in one container.
 
@@ -70,7 +71,7 @@ back out, and nothing else.
 | Interfaces | `cli.py`, `api/` | Translate in and out. No decisions. |
 | Orchestration | `agent/` | Build the graph, run a turn, measure it. |
 | Capabilities | `tools/` | What the model may call. |
-| Retrieval | `indexing/` | Load, split, embed, search. |
+| Retrieval | `indexing/` | Load, split, embed, search by meaning and by word. |
 | Providers | `providers.py` | The only place OpenAI appears. |
 | Behaviour | `prompts/` | The rules, fetched from Langfuse or read from `templates.py`. |
 | Measurement | `evaluation/` | Grade the agent, locally or on the platform. |
@@ -450,6 +451,7 @@ message rather than failing mid-query.
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
+| `SEARCH_STRATEGY` | `hybrid` | `hybrid` fuses BM25 with the embedding; `vector` uses the embedding alone. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
@@ -607,7 +609,7 @@ src/rag_agent/
 │   ├── pricing.py         token prices, dated
 │   └── logging_setup.py   console and file
 │
-├── indexing/          loader · splitter · vector_store
+├── indexing/          loader · splitter · vector_store · hybrid
 ├── tools/             one module per tool, registered in build_tools()
 ├── agent/             service (build + orchestration) · trace
 ├── api/               routes · schemas · sessions · security · feedback
@@ -1163,6 +1165,45 @@ A judge model is the right call for grading prose, where the wording
 legitimately varies and a string match cannot tell a faithful sentence from a
 distorted one. That is exactly what `--judge` adds, kept separate and opt-in
 so the reproducible scores stay reproducible.
+
+### Hybrid search
+
+Two retrievers run and their rankings are fused.
+
+An embedding compares meaning, which is what lets a question find a passage
+that shares none of its words. It also spreads a long article's signal across
+everything the article discusses, so one sentence stating a deadline ranks
+below whatever the article is mostly about.
+
+BM25 compares words. It cannot follow a paraphrase, and it does not need to
+when the question names the terms the text uses.
+
+Measured on this corpus, on the question the suite failed for weeks: the
+passage stating the suspension deadline sits at **rank 31 by embedding** and at
+**rank 5 by keyword**.
+
+The two lists are merged by reciprocal rank fusion. Each document scores the
+sum of `1 / (60 + rank)` over the lists it appears in, so a passage both
+retrievers rank well beats one a single retriever loves. Fusing on rank rather
+than on score is what makes it work at all: a cosine distance and a BM25 score
+are not on the same scale and cannot be added.
+
+Each retriever is asked for five times the passages wanted, and the fused list
+is cut back. Fusing two short lists only rewards what both retrievers already
+agreed on, which is what either would have found alone; the passages worth
+adding sit deeper in one list. Measured here, the missing deadline reaches the
+top eight at a multiplier of five and not at three.
+
+`SEARCH_STRATEGY=vector` turns the keyword half off. The keyword index is built
+once from what is stored and dropped whenever the store changes, since it is a
+copy.
+
+**What it fixed:** the last failing case, and with it `correctness` and
+`faithfulness`. Every metric now reads 100% on 29 questions.
+
+**What that number is worth:** the five deterministic metrics are reproducible,
+so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
+and drifts; one run at 100% is not a guarantee of the next.
 
 ### The six metrics
 

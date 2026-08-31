@@ -12,6 +12,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _ROOT_MARKER = "pyproject.toml"
 
 
+class SearchStrategy(StrEnum):
+    """How passages are found."""
+
+    VECTOR = "vector"
+    HYBRID = "hybrid"
+
+
 class ChunkStrategy(StrEnum):
     """How documents are cut into chunks."""
 
@@ -87,6 +94,13 @@ class Settings(BaseSettings):
     # reports finding nothing, and the model keeps rewording. Measured on this
     # corpus, a distance threshold cannot separate the two cases: the worst
     # valid question scores 0.97 and the best invalid one 0.84. A budget can.
+    # `hybrid` runs BM25 alongside the embedding and fuses the two rankings.
+    # An embedding spreads a long article's signal across everything the
+    # article discusses, so one sentence stating a deadline ranks below the
+    # article's main subject. Keyword search does not have that problem, and
+    # cannot follow a paraphrase, which is why both run.
+    search_strategy: SearchStrategy = Field(default=SearchStrategy.HYBRID)
+
     max_searches_per_turn: int = Field(default=3, gt=0, le=10)
 
     knowledge_domain: str = Field(default="a documentação interna da organização", min_length=3)
