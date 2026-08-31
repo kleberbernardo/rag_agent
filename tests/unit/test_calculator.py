@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from rag_agent.tools import calculate
+from rag_agent.tools import build_calculator_tool, calculate
 
 
 def evaluate(expression: str) -> str:
-    """Invoke the tool the way the agent would."""
-    return calculate.invoke({"expression": expression})
+    """The tool's body, called directly.
+
+    The LangChain wrapper adds nothing worth exercising here: what is under
+    test is the arithmetic and the refusals, not the schema around them.
+    """
+    return calculate(expression)
 
 
 class TestArithmetic:
@@ -65,3 +69,22 @@ class TestErrorContract:
 
     def test_explains_why_it_failed(self) -> None:
         assert evaluate("2 +").startswith("Não foi possível calcular")
+
+
+class TestToolContract:
+    """The description is what the model reads to decide whether to call it."""
+
+    def test_the_tool_carries_a_description(self) -> None:
+        assert build_calculator_tool().description.strip()
+
+    def test_the_description_says_when_to_use_it(self) -> None:
+        assert "conta" in build_calculator_tool().description.lower()
+
+    def test_it_is_named_for_the_model(self) -> None:
+        assert build_calculator_tool().name == "calculate"
+
+    def test_the_description_is_versionable_rather_than_a_docstring(self) -> None:
+        """A docstring is frozen at import; this one is fetched at call time."""
+        from rag_agent.prompts import CALCULATOR_TOOL_PROMPT_NAME, PUBLISHED_PROMPTS
+
+        assert CALCULATOR_TOOL_PROMPT_NAME in PUBLISHED_PROMPTS

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_NAME = "rag-agent-system"
 SEARCH_TOOL_PROMPT_NAME = "rag-agent-search-tool"
+CALCULATOR_TOOL_PROMPT_NAME = "rag-agent-calculator-tool"
 
 SYSTEM_PROMPT_TEMPLATE = """Você é um assistente especializado em {{domain}}.
 
@@ -51,9 +52,21 @@ Args:
 Returns:
     Os trechos encontrados, cada um com o nome do arquivo de origem."""
 
+CALCULATOR_DESCRIPTION_TEMPLATE = """Calcula uma expressão aritmética e devolve o resultado exato.
+
+Use SEMPRE que a resposta envolver conta -- soma, multiplicação, porcentagem,
+total anual. Modelos de linguagem erram aritmética; esta ferramenta não erra.
+
+Args:
+    expression: expressão em notação Python. Ex: "890 * 12", "(300-50)/2".
+
+Returns:
+    O resultado, ou uma mensagem explicando por que a expressão é inválida."""
+
 PUBLISHED_PROMPTS = {
     SYSTEM_PROMPT_NAME: SYSTEM_PROMPT_TEMPLATE,
     SEARCH_TOOL_PROMPT_NAME: SEARCH_TOOL_DESCRIPTION_TEMPLATE,
+    CALCULATOR_TOOL_PROMPT_NAME: CALCULATOR_DESCRIPTION_TEMPLATE,
 }
 
 
@@ -69,6 +82,17 @@ def build_search_tool_description() -> str:
     contract that decides whether the tool gets called at all.
     """
     return _render(SEARCH_TOOL_PROMPT_NAME, SEARCH_TOOL_DESCRIPTION_TEMPLATE)
+
+
+def build_calculator_description() -> str:
+    """Render the calculator's description.
+
+    Same kind of contract as the search tool: the model reads it to decide
+    whether a question needs arithmetic, so it is tuned like a prompt and
+    belongs with the prompts. It carries no placeholder, being independent of
+    the corpus.
+    """
+    return _render(CALCULATOR_TOOL_PROMPT_NAME, CALCULATOR_DESCRIPTION_TEMPLATE)
 
 
 def describe_source() -> tuple[str, int | None]:

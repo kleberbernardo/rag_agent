@@ -11,9 +11,13 @@ from __future__ import annotations
 import ast
 import logging
 
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
+
+from rag_agent.prompts import build_calculator_description
 
 logger = logging.getLogger(__name__)
+
+TOOL_NAME = "calculate"
 
 _MAX_EXPONENT = 100
 
@@ -34,20 +38,8 @@ _ALLOWED_NODES = (
 )
 
 
-@tool
 def calculate(expression: str) -> str:
-    """Calcula uma expressão aritmética e devolve o resultado exato.
-
-    Use SEMPRE que a resposta envolver conta -- soma, multiplicação,
-    porcentagem, total anual. Modelos de linguagem erram aritmética;
-    esta ferramenta não erra.
-
-    Args:
-        expression: expressão em notação Python. Ex: "890 * 12", "(300-50)/2".
-
-    Returns:
-        O resultado, ou uma mensagem explicando por que a expressão é inválida.
-    """
+    """Evaluate an arithmetic expression, or explain why it was refused."""
     try:
         tree = ast.parse(expression, mode="eval")
         result = _evaluate(tree)
@@ -56,6 +48,20 @@ def calculate(expression: str) -> str:
         return f"Não foi possível calcular: {error}"
 
     return _format(result)
+
+
+def build_calculator_tool() -> StructuredTool:
+    """Build the tool with the description the model reads to decide.
+
+    A factory rather than a decorator, for the same reason as the search tool:
+    `@tool` freezes the docstring at import, and the description is fetched at
+    call time so it can be versioned outside the code.
+    """
+    return StructuredTool.from_function(
+        func=calculate,
+        name=TOOL_NAME,
+        description=build_calculator_description(),
+    )
 
 
 def _evaluate(node: ast.AST) -> float:

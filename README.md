@@ -701,6 +701,36 @@ Editing the text in the Langfuse UI and moving the `production` label is how a
 new version reaches the agent. Rolling back is moving the label to the previous
 one. Neither touches the repository.
 
+### What is published, and what is not
+
+Three prompts go to Langfuse:
+
+| Prompt | What the model does with it |
+|---|---|
+| `rag-agent-system` | The rules it answers under |
+| `rag-agent-search-tool` | Decides whether a question needs retrieval |
+| `rag-agent-calculator-tool` | Decides whether a question needs arithmetic |
+
+The line is what the text is for. A **description the model reads to decide**
+is tuned the way a prompt is tuned, so it belongs where prompts are versioned.
+The tool descriptions are exactly that: the model never sees a tool's body,
+only its name and its description, and rewording one changes when it gets
+called.
+
+What stays in the code is the text a tool **returns**: `"Divisão por zero."`,
+`"Nenhum trecho relevante encontrado na documentação."`. Those report what
+happened during a run. They are facts about execution rather than instructions,
+and nobody A/B tests them.
+
+`_NO_RESULTS` sits closest to the line, since it is what prompts the agent to
+say it found nothing. It stays in code because it states a fact; the
+instruction to admit ignorance lives in the system prompt, where it can be
+tuned.
+
+Both tools are therefore built by a factory rather than the `@tool` decorator:
+a decorator freezes the docstring at import, and a description fetched at call
+time is the whole point.
+
 ### It never blocks an answer
 
 Without Langfuse configured, the templates in `prompts.py` are used and

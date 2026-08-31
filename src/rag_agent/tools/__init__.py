@@ -13,13 +13,19 @@ To add a tool: write it in its own module, then register it in build_tools().
 
 from langchain_core.tools import BaseTool
 
-from rag_agent.tools.calculator import calculate
+from rag_agent.tools.calculator import build_calculator_tool, calculate
 from rag_agent.tools.documentation import build_search_tool, search_documentation
 
 
 def build_tools() -> list[BaseTool]:
     """Assemble every tool the agent may call."""
-    return [build_search_tool(), calculate]
+    return [build_search_tool(), build_calculator_tool()]
 
 
-__all__ = ["build_search_tool", "build_tools", "calculate", "search_documentation"]
+__all__ = [
+    "build_calculator_tool",
+    "build_search_tool",
+    "build_tools",
+    "calculate",
+    "search_documentation",
+]
