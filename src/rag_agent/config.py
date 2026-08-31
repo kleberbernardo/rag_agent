@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     # narrow window keeps landing on the neighbouring deadline.
     retrieval_k: int = Field(default=8, gt=0)
 
+    # A question the corpus cannot answer makes the agent search again and
+    # again: the search always returns its k nearest chunks, so it never
+    # reports finding nothing, and the model keeps rewording. Measured on this
+    # corpus, a distance threshold cannot separate the two cases: the worst
+    # valid question scores 0.97 and the best invalid one 0.84. A budget can.
+    max_searches_per_turn: int = Field(default=3, gt=0, le=10)
+
     knowledge_domain: str = Field(default="a documentação interna da organização", min_length=3)
     """What the knowledge base is about, in the language of the answers.
 

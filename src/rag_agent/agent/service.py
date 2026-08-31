@@ -82,6 +82,12 @@ class ChatSession:
         # from here is what keeps earlier turns from being counted twice.
         turn_start = len(self._messages)
 
+        # Rebuilt every turn, which is what gives the search budget a fresh
+        # count. Construction is local object assembly with no network in it,
+        # so paying for it once per question is cheaper than the plumbing that
+        # would carry a reset into the tool.
+        self._agent = build_agent()
+
         started = time.perf_counter()
         state = self._agent.invoke(
             {"messages": self._messages},

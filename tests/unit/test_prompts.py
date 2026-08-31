@@ -93,3 +93,80 @@ class TestNoHardcodedDomain:
 
     def test_default_domain_is_generic(self) -> None:
         assert get_settings().knowledge_domain == "a documentação interna da organização"
+
+
+class TestSearchBudget:
+    """A vector search always returns its k nearest chunks, however far.
+
+    It can therefore never report finding nothing, and on a question the
+    corpus cannot answer the agent rewords the query until the graph runs out
+    of steps and the call dies with no answer at all. The budget turns that
+    into a refusal, which is the truthful outcome.
+    """
+
+    def search_count(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """Replace the retrieval, recording every query that reaches it."""
+        from rag_agent.tools import documentation
+
+        asked: list[str] = []
+
+        def fake_search(question: str, k: int | None = None) -> list:
+            asked.append(question)
+            return []
+
+        monkeypatch.setattr(documentation, "search", fake_search)
+        return asked
+
+    def test_it_searches_while_within_budget(
+        self, monkeypatch: pytest.MonkeyPatch, domain: str
+    ) -> None:
+        monkeypatch.setenv("MAX_SEARCHES_PER_TURN", "3")
+        get_settings.cache_clear()
+        asked = self.search_count(monkeypatch)
+
+        tool = build_search_tool()
+        for term in ("a", "b", "c"):
+            tool.invoke({"question": term})
+
+        assert asked == ["a", "b", "c"]
+
+    def test_beyond_the_budget_it_stops_searching(
+        self, monkeypatch: pytest.MonkeyPatch, domain: str
+    ) -> None:
+        monkeypatch.setenv("MAX_SEARCHES_PER_TURN", "2")
+        get_settings.cache_clear()
+        asked = self.search_count(monkeypatch)
+
+        tool = build_search_tool()
+        for term in ("a", "b", "c", "d"):
+            tool.invoke({"question": term})
+
+        assert asked == ["a", "b"]
+
+    def test_it_tells_the_model_to_stop_rather_than_failing(
+        self, monkeypatch: pytest.MonkeyPatch, domain: str
+    ) -> None:
+        """Raising would end the run; the model has to be told to conclude."""
+        monkeypatch.setenv("MAX_SEARCHES_PER_TURN", "1")
+        get_settings.cache_clear()
+        self.search_count(monkeypatch)
+
+        tool = build_search_tool()
+        tool.invoke({"question": "primeira"})
+        answer = tool.invoke({"question": "segunda"})
+
+        assert "não encontrei isso na documentação" in answer
+        assert "Pare de buscar" in answer
+
+    def test_each_tool_carries_its_own_budget(
+        self, monkeypatch: pytest.MonkeyPatch, domain: str
+    ) -> None:
+        """A fresh tool per turn is what resets the count."""
+        monkeypatch.setenv("MAX_SEARCHES_PER_TURN", "1")
+        get_settings.cache_clear()
+        asked = self.search_count(monkeypatch)
+
+        build_search_tool().invoke({"question": "turno-1"})
+        build_search_tool().invoke({"question": "turno-2"})
+
+        assert asked == ["turno-1", "turno-2"]

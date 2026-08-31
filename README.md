@@ -106,9 +106,22 @@ asks whether it requested a tool:
 
 That cycle lets the agent search, read what came back, and decide again. Without it the flow is linear: retrieve once, answer, stop.
 
-The loop is capped at ten steps. A question the corpus cannot answer once made
-the agent search over and over, each round adding passages, until the context
-window overflowed and the call died.
+The loop is capped two ways, and both caps exist because of the same
+question: one the corpus cannot answer.
+
+`MAX_SEARCHES_PER_TURN` stops the searching. A vector search always returns its
+`k` nearest chunks, however far they sit, so it can never report finding
+nothing. The agent therefore sees results on every attempt and rewords the
+query indefinitely. Past the budget the tool answers with an instruction to
+conclude, and the agent says it did not find the subject, which is the truthful
+outcome.
+
+A distance threshold would be the obvious fix and does not work here. Measured
+on this corpus, the worst valid question scores 0.972 and the best invalid one
+0.840: the ranges overlap, so any cut rejects good questions or accepts bad
+ones.
+
+Ten steps on the graph is the second cap, and the safety net behind the first.
 
 ## Technologies
 
@@ -438,6 +451,7 @@ message rather than failing mid-query.
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
+| `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
 | `LOG_DIR` | `logs/` | Where the log file is written. |

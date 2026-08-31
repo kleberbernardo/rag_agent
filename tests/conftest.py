@@ -35,6 +35,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "CHUNK_STRATEGY",
         "ARTICLE_MAX_CHARS",
         "RETRIEVAL_K",
+        "MAX_SEARCHES_PER_TURN",
         "DATA_DIR",
         "VECTOR_STORE_DIR",
         "COLLECTION_NAME",
