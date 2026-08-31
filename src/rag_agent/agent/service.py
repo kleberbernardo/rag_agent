@@ -15,8 +15,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from rag_agent.config import get_settings
-from rag_agent.observability import build_run_config
-from rag_agent.pricing import estimate_cost_usd
+from rag_agent.observability import build_run_config, estimate_cost_usd
 from rag_agent.prompts import build_system_prompt
 from rag_agent.providers import build_chat_model
 from rag_agent.tools import build_tools

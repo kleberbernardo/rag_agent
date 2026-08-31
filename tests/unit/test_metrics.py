@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from rag_agent.agent import service
 from rag_agent.agent.service import ChatSession
 from rag_agent.config import get_settings
-from rag_agent.pricing import MODEL_PRICING_USD_PER_MILLION, estimate_cost_usd
+from rag_agent.observability import MODEL_PRICING_USD_PER_MILLION, estimate_cost_usd
 
 
 def usage(input_tokens: int, output_tokens: int) -> dict[str, int]:

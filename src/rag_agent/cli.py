@@ -39,15 +39,14 @@ from rag_agent.indexing import (
     reset_index,
     split_documents,
 )
-from rag_agent.logging_setup import setup_logging
 from rag_agent.observability import flush as flush_traces
-from rag_agent.observability import publish_prompt
+from rag_agent.observability import publish_prompt, setup_logging
 from rag_agent.prompts import (
-    PUBLISHED_PROMPTS,
     build_search_tool_description,
     build_system_prompt,
     describe_source,
 )
+from rag_agent.prompts.templates import PUBLISHED_PROMPTS
 from rag_agent.types import AnswerResult, RunMetrics
 
 app = typer.Typer(

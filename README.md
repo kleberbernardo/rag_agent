@@ -72,7 +72,7 @@ back out, and nothing else.
 | Capabilities | `tools/` | What the model may call. |
 | Retrieval | `indexing/` | Load, split, embed, search. |
 | Providers | `providers.py` | The only place OpenAI appears. |
-| Behaviour | `prompts.py` | The rules, fetched from Langfuse or read from code. |
+| Behaviour | `prompts/` | The rules, fetched from Langfuse or read from `templates.py`. |
 | Measurement | `evaluation/` | Grade the agent against known answers. |
 
 ---
@@ -510,17 +510,27 @@ src/rag_agent/
 ├── config.py          settings, read from the environment and validated at boot
 ├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
 ├── providers.py       LLM and embedding clients, the only place OpenAI appears
-├── prompts.py         the agent's permanent instructions, rendered per domain
-├── pricing.py         token prices, used to estimate what a run cost
-├── observability.py   optional Langfuse tracing, inert without keys
-├── logging_setup.py   console and file logging
 ├── cli.py             presentation only, no domain logic
+│
+├── prompts/           the instructions, and where they are read from
+│   ├── __init__.py        fetch from Langfuse, render, fall back to the text
+│   └── templates.py       the text itself, and nothing else
+│
+├── observability/     what the run did, what it cost, and writing it down
+│   ├── tracing.py         Langfuse: traces, scores, prompt registry
+│   ├── pricing.py         token prices, dated
+│   └── logging_setup.py   console and file
+│
 ├── indexing/          loader · splitter · vector_store
 ├── tools/             one module per tool, registered in build_tools()
 ├── agent/             service (build + orchestration) · trace
-├── api/               FastAPI wrapper: routes · schemas · sessions
-└── evaluation/        dataset · metrics · runner
+├── api/               routes · schemas · sessions · security · feedback
+└── evaluation/        dataset · metrics · runner · comparison · configuration
 ```
+
+Four loose modules and seven packages. The four are the ones every layer
+reaches for and none of them owns: settings, domain types, the provider
+boundary, and the terminal.
 
 Only three directories, and each earns it: `indexing/` grows with every new
 file format, `tools/` with every new tool, `agent/` holds the orchestration.
@@ -529,11 +539,11 @@ Everything else is a single module.
 | To change... | Edit |
 |---|---|
 | The knowledge base | `data/`, then `rag ingest` |
-| How the agent behaves | Langfuse, or `prompts.py` as the fallback |
+| How the agent behaves | Langfuse, or `prompts/templates.py` as the fallback |
 | Add a tool | `tools/` |
 | Chunking or retrieval | `.env` |
 | The model provider | `providers.py` |
-| Token prices | `pricing.py` |
+| Token prices | `observability/pricing.py` |
 | Add an endpoint | `api/routes.py` |
 
 Interfaces stay thin because orchestration lives in `agent/service.py`. Adding

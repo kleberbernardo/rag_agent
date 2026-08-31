@@ -85,6 +85,6 @@ class TestToolContract:
 
     def test_the_description_is_versionable_rather_than_a_docstring(self) -> None:
         """A docstring is frozen at import; this one is fetched at call time."""
-        from rag_agent.prompts import CALCULATOR_TOOL_PROMPT_NAME, PUBLISHED_PROMPTS
+        from rag_agent.prompts.templates import CALCULATOR_TOOL_PROMPT_NAME, PUBLISHED_PROMPTS
 
         assert CALCULATOR_TOOL_PROMPT_NAME in PUBLISHED_PROMPTS

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from rag_agent import observability
 from rag_agent.config import get_settings
+from rag_agent.observability import tracing as observability
 
 
 class FakeLangfuse:

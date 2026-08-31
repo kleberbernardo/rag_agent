@@ -11,16 +11,18 @@ from typing import Any
 
 import pytest
 
-from rag_agent import observability
 from rag_agent.config import get_settings
+from rag_agent.observability import tracing as observability
 from rag_agent.prompts import (
+    build_search_tool_description,
+    build_system_prompt,
+    describe_source,
+)
+from rag_agent.prompts.templates import (
     PUBLISHED_PROMPTS,
     SEARCH_TOOL_PROMPT_NAME,
     SYSTEM_PROMPT_NAME,
     SYSTEM_PROMPT_TEMPLATE,
-    build_search_tool_description,
-    build_system_prompt,
-    describe_source,
 )
 
 

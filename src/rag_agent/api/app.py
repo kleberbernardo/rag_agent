@@ -20,7 +20,7 @@ from rag_agent.api.security import require_api_key
 from rag_agent.api.sessions import InMemorySessionStore, RedisSessionStore, SessionStore
 from rag_agent.config import SessionBackend, get_settings
 from rag_agent.indexing import count_documents, describe_location
-from rag_agent.logging_setup import setup_logging
+from rag_agent.observability import setup_logging
 
 logger = logging.getLogger(__name__)
 
