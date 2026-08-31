@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,13 @@ from typing import Any
 from rag_agent.agent.service import ask
 from rag_agent.evaluation.configuration import RunConfiguration, capture_configuration
 from rag_agent.evaluation.dataset import EvalCase
-from rag_agent.evaluation.metrics import CaseScore, error_score, score_case
+from rag_agent.evaluation.judge import judge_answer
+from rag_agent.evaluation.metrics import (
+    CaseScore,
+    error_score,
+    retrieved_passages,
+    score_case,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +75,10 @@ class EvalReport:
         return self._rate(lambda score: score.refusal_correct)
 
     @property
+    def judged(self) -> Rate:
+        return self._rate(lambda score: score.judged)
+
+    @property
     def groundedness(self) -> Rate:
         return self._rate(lambda score: score.grounded)
 
@@ -115,6 +125,7 @@ class EvalReport:
                 "factual_accuracy": self.factual_accuracy.percent,
                 "refusal_accuracy": self.refusal_accuracy.percent,
                 "groundedness": self.groundedness.percent,
+                "judged": self.judged.percent,
                 "median_latency_seconds": round(self.median_latency, 2),
                 "total_tokens": self.total_tokens,
                 "total_cost_usd": round(self.total_cost_usd, 5),
@@ -134,6 +145,8 @@ class EvalReport:
                     "grounded": score.grounded,
                     "groundedness_ratio": score.groundedness_ratio,
                     "ungrounded_numbers": score.ungrounded_numbers,
+                    "judged": score.judged,
+                    "judge_reason": score.judge_reason,
                     "latency_seconds": round(score.latency_seconds, 2),
                     "total_tokens": score.total_tokens,
                     "cost_usd": score.cost_usd,
@@ -148,8 +161,14 @@ def run_evaluation(
     cases: list[EvalCase],
     *,
     ask_function: AskFunction | None = None,
+    with_judge: bool = False,
 ) -> Iterator[CaseScore]:
-    """Grade each case in turn, yielding as it goes so callers can show progress."""
+    """Grade each case in turn, yielding as it goes so callers can show progress.
+
+    The judge is opt-in: it spends tokens on every case and its verdict drifts
+    between runs, so it complements the deterministic metrics rather than
+    joining them by default.
+    """
     answer_for = ask_function or ask
 
     for case in cases:
@@ -163,7 +182,26 @@ def run_evaluation(
             yield error_score(case, error)
             continue
 
-        yield score_case(case, result)  # type: ignore[arg-type]
+        score = score_case(case, result)  # type: ignore[arg-type]
+        yield _with_judgement(score, result) if with_judge else score
+
+
+def _with_judgement(score: CaseScore, result: Any) -> CaseScore:
+    """Ask a second model whether the sentence around the number holds up."""
+    verdict = judge_answer(
+        question=score.question,
+        passages=retrieved_passages(result.messages),
+        answer=score.answer,
+    )
+    if verdict is None:
+        return score
+
+    return replace(
+        score,
+        judged_faithful=verdict.faithful,
+        judged_complete=verdict.complete,
+        judge_reason=verdict.reason,
+    )
 
 
 def build_report(scores: list[CaseScore]) -> EvalReport:

@@ -19,6 +19,7 @@ from __future__ import annotations
 SYSTEM_PROMPT_NAME = "rag-agent-system"
 SEARCH_TOOL_PROMPT_NAME = "rag-agent-search-tool"
 CALCULATOR_TOOL_PROMPT_NAME = "rag-agent-calculator-tool"
+JUDGE_PROMPT_NAME = "rag-agent-judge"
 
 # The agent's constitution: behaviour, never content. Each rule exists to
 # prevent a concrete failure observed in RAG systems, and rules 1 to 3 were
@@ -64,8 +65,33 @@ Args:
 Returns:
     O resultado, ou uma mensagem explicando por que a expressão é inválida."""
 
+# The rubric a second model grades answers against, when asked to. Managed
+# like the rest, so tightening it is a version rather than a commit. It
+# carries no placeholder: the case is passed in the user message.
+JUDGE_PROMPT_TEMPLATE = """Você avalia respostas de um assistente que só pode usar os trechos recuperados.
+
+Receberá a PERGUNTA, os TRECHOS que o assistente leu e a RESPOSTA que ele deu.
+
+Avalie duas coisas, e apenas elas:
+
+1. FIEL: a resposta diz o mesmo que os trechos? Marque como não fiel se ela
+   inverte uma condição ("pode" virando "deve"), acrescenta um qualificador que
+   não está no texto, generaliza uma exceção, ou atribui a regra a outro
+   sujeito. Um número correto não torna a frase fiel.
+
+2. COMPLETA: a resposta responde o que foi perguntado? Marque como incompleta
+   se responde outra coisa, ou se para no meio. Admitir que não encontrou é
+   uma resposta completa quando os trechos realmente não contêm o assunto.
+
+Não avalie estilo, tamanho, nem se a resposta cita a fonte. Outra verificação
+cuida disso.
+
+Justifique em no máximo duas frases, apontando o trecho que sustenta seu
+julgamento."""
+
 PUBLISHED_PROMPTS = {
     SYSTEM_PROMPT_NAME: SYSTEM_PROMPT_TEMPLATE,
     SEARCH_TOOL_PROMPT_NAME: SEARCH_TOOL_DESCRIPTION_TEMPLATE,
     CALCULATOR_TOOL_PROMPT_NAME: CALCULATOR_DESCRIPTION_TEMPLATE,
+    JUDGE_PROMPT_NAME: JUDGE_PROMPT_TEMPLATE,
 }

@@ -70,7 +70,20 @@ class CaseScore:
     cost_usd: float | None
     groundedness_ratio: float | None = None
     ungrounded_numbers: list[str] = field(default_factory=list)
+    judged_faithful: bool | None = None
+    judged_complete: bool | None = None
+    judge_reason: str | None = None
     error: str | None = None
+
+    @property
+    def judged(self) -> bool | None:
+        """Whether a second model found the answer faithful and complete.
+
+        None when the judge did not run, which is not the same as failing it.
+        """
+        if self.judged_faithful is None or self.judged_complete is None:
+            return None
+        return self.judged_faithful and self.judged_complete
 
     @property
     def grounded(self) -> bool | None:
@@ -91,6 +104,7 @@ class CaseScore:
                 self.facts_present,
                 self.refusal_correct,
                 self.grounded,
+                self.judged,
             )
             if value is not None
         ]
@@ -243,6 +257,13 @@ def _render(value: float) -> str:
 def _fold(word: str) -> str:
     """Strip the accents from a scale word so "milhões" reaches the table."""
     return _normalise(word)
+
+
+def retrieved_passages(messages: list[BaseMessage]) -> str:
+    """Everything the search tool returned, as the judge needs to read it."""
+    return "\n\n".join(
+        str(message.content) for message in messages if isinstance(message, ToolMessage)
+    )
 
 
 def extract_retrieved_sources(messages: list[BaseMessage]) -> list[str]:

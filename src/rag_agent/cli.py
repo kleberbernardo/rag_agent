@@ -76,6 +76,11 @@ MaxCostOption = typer.Option(
     min=0.0,
     help="Custo máximo em US$ para a execução inteira. 0 desliga a checagem.",
 )
+JudgeOption = typer.Option(
+    False,
+    "--judge",
+    help="Também pede a um modelo que julgue fidelidade e completude. Custa tokens.",
+)
 MinScoreOption = typer.Option(
     1.0,
     "--min-score",
@@ -185,6 +190,7 @@ def dataset_push(
 @dataset_app.command("run")
 def dataset_run(
     name: str | None = RunNameOption,
+    judge: bool = JudgeOption,
     verbose: bool = VerboseOption,
 ) -> None:
     """Roda o dataset como experimento no Langfuse, com os traces e as notas lá."""
@@ -202,6 +208,7 @@ def dataset_run(
                 name=run_name,
                 description=f"chunking {settings.chunk_strategy.value}, k={settings.retrieval_k}",
                 metadata=configuration,
+                with_judge=judge,
             )
         )
 
@@ -346,6 +353,7 @@ def eval_command(
     compare_with: Path | None = CompareOption,
     min_score: float = MinScoreOption,
     max_cost: float = MaxCostOption,
+    judge: bool = JudgeOption,
     verbose: bool = VerboseOption,
 ) -> None:
     """Mede o agente contra perguntas cuja resposta é conhecida."""
@@ -358,7 +366,7 @@ def eval_command(
 
     scores: list[CaseScore] = []
     with console.status(f"[cyan]Avaliando {len(cases)} caso(s)...") as spinner:
-        for score in run_evaluation(cases):
+        for score in run_evaluation(cases, with_judge=judge):
             scores.append(score)
             spinner.update(f"[cyan]Avaliando... {len(scores)}/{len(cases)} · {score.case_id}")
             console.print(
@@ -388,7 +396,9 @@ def eval_command(
     # not block a release, while a real regression should.
     overall = report.overall.ratio or 0.0
     if overall < min_score:
-        console.print(f"\n[red]abaixo do limiar:[/] {overall:.0%} < {min_score:.0%}")
+        # One decimal, because 26 of 29 rounds to 90% and reading
+        # "90% < 90%" as the reason for a failure helps nobody.
+        console.print(f"\n[red]abaixo do limiar:[/] {overall:.1%} < {min_score:.1%}")
         raise typer.Exit(code=1)
 
 
@@ -430,9 +440,12 @@ def _render_report(report: EvalReport) -> None:
             ("fato", score.facts_present),
             ("recusa", score.refusal_correct),
             ("fundamentação", score.grounded),
+            ("juiz", score.judged),
         ):
             if value is False:
                 console.print(f"  [red]falhou em {label}")
+        if score.judge_reason and score.judged is False:
+            console.print(f"  [red]juiz:[/] {escape(score.judge_reason)}")
         if score.ungrounded_numbers:
             console.print(
                 f"  [red]números sem apoio na fonte:[/] {', '.join(score.ungrounded_numbers)}"

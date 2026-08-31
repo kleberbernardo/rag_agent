@@ -906,6 +906,7 @@ rag eval                     # the whole suite, ~2 minutes, ~US$ 0.02
 rag eval --limit 5           # a quick sample
 rag eval --min-score 0.90    # fail below 90% instead of below perfect
 rag eval --max-cost 0.05     # fail if the run costs more than expected
+rag eval --judge             # add a model that reads the sentence
 rag eval --compare <report>  # diff against a previous run
 rag eval --dataset my.json   # your own questions
 ```
@@ -1055,6 +1056,7 @@ established name in the RAG evaluation literature.
 | retrieval | context recall | RAGAS |
 | fato | answer correctness | RAGAS, DeepEval |
 | fundamentação | faithfulness, groundedness | RAGAS, TruLens |
+| juiz | LLM-as-a-judge, answer relevancy | RAGAS, LangSmith, DeepEval |
 | citação | attribution | LangSmith |
 | recusa | hallucination rate on unanswerable questions | RAGAS |
 
@@ -1071,8 +1073,54 @@ these metrics check numbers and file names rather than meaning. The gain is
 that the same run always produces the same number, and it costs nothing to
 grade.
 
-A judge model would be the right call for a larger dataset, or for grading
-prose where the wording legitimately varies. At this size it would buy noise.
+A judge model is the right call for grading prose, where the wording
+legitimately varies and a string match cannot tell a faithful sentence from a
+distorted one. That is exactly what `--judge` adds, kept separate and opt-in
+so the reproducible scores stay reproducible.
+
+### The judge
+
+The five metrics above check numbers and file names. They pass an answer that
+states the right figure while inverting the condition around it: the regulation
+says a fact **may** be withheld, the answer says it **must** be, and no number
+moved.
+
+Catching that needs something that reads:
+
+```bash
+rag eval --judge                    # locally
+rag dataset run --judge             # as an experiment
+```
+
+A second model receives the question, the passages the agent actually read, and
+the answer, and grades two things only:
+
+| | |
+|---|---|
+| **Faithful** | Does the answer say what the passages say? |
+| **Complete** | Does it answer the question that was asked? |
+
+It is told not to judge style, length or citation, because other checks already
+do. The verdict comes back as a structured object rather than prose, so the
+grade is never parsed out of a sentence.
+
+**What it found on the first run**, on two cases every deterministic metric had
+passed:
+
+| Case | Deterministic | Judge |
+|---|---|---|
+| `garantia-emprestimo` | passed | The answer gives 140% "do valor do financiamento" for a question about **lending shares**, conflating two rules from the same document. |
+| `alteracao-informacoes` | passed | The answer opens with "deve ser comunicada imediatamente" where the text says **15 days**. The number appears later, so the string match was satisfied. |
+
+**Its cost is what a judge always costs.** It spends tokens on every case and
+it drifts, so the same answer can be graded differently twice. That is why it
+is opt-in and why it never replaces the deterministic metrics: they say whether
+the number is right, this says whether the sentence around it holds.
+
+The rubric is a managed prompt like the others, so tightening it is a version
+in Langfuse rather than a commit. And a judge that fails leaves the other five
+scores standing: a grader that can end the run it is grading is worse than one
+metric fewer.
 
 ### On the platform
 

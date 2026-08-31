@@ -16,12 +16,14 @@ cost nothing, and reusing them means the two paths cannot disagree.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from rag_agent.agent.service import ask
 from rag_agent.evaluation.dataset import EvalCase
+from rag_agent.evaluation.judge import judge_answer
 from rag_agent.evaluation.metrics import extract_retrieved_sources as sources_of
-from rag_agent.evaluation.metrics import groundedness, is_refusal
+from rag_agent.evaluation.metrics import groundedness, is_refusal, retrieved_passages
 from rag_agent.observability.tracing import client_or_none
 
 logger = logging.getLogger(__name__)
@@ -73,6 +75,7 @@ def run_experiment(
     description: str = "",
     dataset_name: str = DATASET_NAME,
     metadata: dict[str, Any] | None = None,
+    with_judge: bool = False,
 ) -> Any:
     """Run every dataset item through the agent, as a tracked experiment.
 
@@ -83,11 +86,23 @@ def run_experiment(
     client = _require_client()
     dataset = client.get_dataset(dataset_name)
 
+    # Annotated explicitly: the evaluators differ in which keyword arguments
+    # they read, and inference would pin the list to the first one.
+    evaluators: list[Callable[..., list[dict[str, Any]]]] = [
+        _retrieval,
+        _citation,
+        _facts,
+        _refusal,
+        _grounded,
+    ]
+    if with_judge:
+        evaluators.append(_judged)
+
     return dataset.run_experiment(
         name=name,
         description=description,
         task=_answer,
-        evaluators=[_retrieval, _citation, _facts, _refusal, _grounded],
+        evaluators=evaluators,
         metadata=metadata or {},
     )
 
@@ -113,6 +128,7 @@ def _answer(*, item: Any, **_: Any) -> dict[str, Any]:
         return {
             "answer": "",
             "sources": [],
+            "passages": "",
             "groundedness": None,
             "refused": False,
             "error": f"{type(error).__name__}: {error}",
@@ -121,6 +137,9 @@ def _answer(*, item: Any, **_: Any) -> dict[str, Any]:
     return {
         "answer": result.answer,
         "sources": sources_of(result.messages),
+        # Carried so the judge grades against what the agent actually read,
+        # rather than a fresh search that might return something else.
+        "passages": retrieved_passages(result.messages),
         "groundedness": groundedness(result.answer, result.messages, item.input["question"])[0],
         "refused": is_refusal(result.answer),
     }
@@ -175,6 +194,27 @@ def _grounded(*, output: Any, **_: Any) -> list[dict[str, Any]]:
         return _skip("fundamentacao", "resposta sem número")
 
     return _score("fundamentacao", ratio == 1.0, f"{ratio:.0%} dos números com apoio")
+
+
+def _judged(*, input: Any, output: Any, **_: Any) -> list[dict[str, Any]]:
+    """Whether a second model finds the answer faithful to the passages.
+
+    The one evaluator here that is not deterministic, and the only one that
+    reads the sentence rather than matching a string.
+    """
+    answer = (output or {}).get("answer")
+    if not answer:
+        return _skip("juiz", "sem resposta")
+
+    verdict = judge_answer(
+        question=(input or {}).get("question", ""),
+        passages=(output or {}).get("passages", ""),
+        answer=answer,
+    )
+    if verdict is None:
+        return _skip("juiz", "o juiz falhou")
+
+    return _score("juiz", verdict.passed, verdict.reason)
 
 
 def _score(name: str, passed: bool, comment: str) -> list[dict[str, Any]]:
