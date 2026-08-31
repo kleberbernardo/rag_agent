@@ -376,6 +376,12 @@ message rather than failing mid-query.
 | `LANGFUSE_PUBLIC_KEY` | none | Optional. Enables tracing when set together with the secret key. |
 | `LANGFUSE_SECRET_KEY` | none | Optional. See [Observability](#observability). |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse region, e.g. `https://us.cloud.langfuse.com`. |
+| `SESSION_BACKEND` | `memory` | `memory` keeps conversations in the process; `redis` shares them. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Where Redis lives, in `redis` mode. |
+| `SESSION_TTL_SECONDS` | `3600` | How long an idle conversation survives. |
+| `API_KEY` | none | Set it and every request needs the `X-API-Key` header. |
+| `MAX_RETRIES` | `3` | Retries on a rate-limited or unavailable provider. |
+| `REQUEST_TIMEOUT_SECONDS` | `60` | Ceiling on one provider call. |
 
 ---
 
@@ -592,12 +598,48 @@ curl -X POST localhost:8080/chat -H "Content-Type: application/json"   -d '{"que
 curl -X POST localhost:8080/chat -H "Content-Type: application/json"   -d '{"question": "e quem deve divulgar?", "session_id": "97c93e1d..."}'
 ```
 
-**Sessions live in the process that served them.** A second replica would not
-see them, and a restart forgets everything. The store caps at 100 conversations
-and evicts the oldest, because each one holds its whole message history and an
-unbounded dictionary is a memory leak with a friendly name. Making sessions
-survive means Redis or a database, which is a decision to take when there is a
-second replica, not before.
+**Where conversations live** depends on `SESSION_BACKEND`.
+
+`memory` is the default and needs nothing running. Conversations belong to the
+process that served them, and the store caps at 100 and evicts the oldest,
+because each holds its whole message history and an unbounded dictionary is a
+memory leak with a friendly name.
+
+`redis` is what makes the service horizontally scalable. A conversation opened
+against one replica is readable by the next, it outlives a restart, and Redis
+expires it after `SESSION_TTL_SECONDS` so an abandoned one does not occupy
+memory forever. `docker compose up` runs this mode.
+
+Only the messages are stored, as JSON. The agent graph holds closures that
+cannot be serialised, and it does not need to be: it is rebuilt from
+configuration on every request. A conversation written by one deployment
+therefore stays readable by the next.
+
+### Authentication
+
+The API is open with no `API_KEY` configured, which keeps `rag serve` working on
+a laptop. Set one and every endpoint requires it:
+
+```bash
+export API_KEY=$(openssl rand -hex 32)
+curl -H "X-API-Key: $API_KEY" localhost:8080/health
+```
+
+A missing or wrong key returns `401` naming the header to send. The comparison
+uses `hmac.compare_digest` rather than `==`, because a plain comparison returns
+as soon as two characters differ, and that timing difference is enough to guess
+a key one character at a time.
+
+It is deliberately not an identity system. There are no users, no scopes and no
+rotation: anything beyond one shared secret belongs to whatever issues the
+tokens, in front of this service.
+
+### Provider failures
+
+A rate-limited or briefly unavailable model is a normal condition, not
+something to hand back to the caller. `MAX_RETRIES` retries with backoff and
+`REQUEST_TIMEOUT_SECONDS` caps a single call, both applied to the chat model
+and to the embeddings.
 
 ### Failure modes
 
@@ -606,10 +648,25 @@ second replica, not before.
 | Empty index | `503` naming the ingestion step |
 | Chroma unreachable | `503` naming the address it tried |
 | Malformed body | `422` from the schema |
+| Missing or wrong API key | `401`, when `API_KEY` is set |
 | Unknown session on delete | `404` |
 
 An unknown `session_id` on `POST /chat` opens a new conversation rather than
 failing: a client holding an id from before a restart should keep working.
+
+### LangSmith
+
+LangChain instruments itself, so LangSmith needs no code here at all:
+
+```bash
+export LANGSMITH_TRACING=true
+export LANGSMITH_API_KEY=lsv2_...
+```
+
+Langfuse is the default because it is open source, self-hostable and
+independent of the framework, while LangSmith is easier to switch on and bound
+more tightly to LangChain. Use one or the other: sending the same run to two
+platforms means two places to look at the same data.
 
 ---
 
@@ -625,15 +682,18 @@ Every answer carries a `run_id`. Send it back with a verdict:
 curl -X POST localhost:8080/feedback -H "Content-Type: application/json"   -d '{"run_id": "9b8c3a27...", "useful": false, "comment": "citou o artigo errado"}'
 ```
 
-Entries are appended to `logs/feedback.jsonl`, one JSON object per line:
+The verdict is recorded in Langfuse as a score on the trace that produced the
+answer, which is where the platform already holds the prompt, the retrieved
+passages and the cost of that same run. Send the `trace_id` alongside the
+`run_id` to attach it.
+
+A local copy is appended to `logs/feedback.jsonl` as well, so the loop still
+closes with tracing switched off:
 
 ```json
-{"recorded_at": "2026-08-30T21:58:08+00:00", "run_id": "9b8c3a27...",
- "useful": false, "comment": "citou o artigo errado"}
+{"recorded_at": "2026-08-31T15:31:04+00:00", "run_id": "9b8c3a27...",
+ "useful": false, "comment": "citou o artigo errado", "sent_to_langfuse": true}
 ```
-
-A file rather than a database: it is appended to, readable by any tool, and
-small enough that anything heavier would be infrastructure without a reason.
 
 **What it is for.** The rejected answers are the candidates for new evaluation
 cases. A question the agent got wrong in real use belongs in `dataset.json`,

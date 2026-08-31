@@ -84,6 +84,9 @@ class FeedbackRequest(BaseModel):
     """A verdict on one answer, tied to the run that produced it."""
 
     run_id: str = Field(min_length=1, max_length=64)
+    trace_id: str | None = Field(
+        default=None, max_length=64, description="Id do trace no Langfuse, quando houver."
+    )
     useful: bool
     comment: str | None = Field(default=None, max_length=1000)
 

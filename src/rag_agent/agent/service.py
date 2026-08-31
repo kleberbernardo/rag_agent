@@ -61,6 +61,21 @@ class ChatSession:
     def messages(self) -> list[BaseMessage]:
         return list(self._messages)
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    def restore(self, messages: list[BaseMessage], session_id: str | None = None) -> None:
+        """Reload a conversation that was persisted elsewhere.
+
+        Only the messages travel. The graph is rebuilt from configuration on
+        every request, so it never needs to be stored, and a session written
+        by an older deployment stays readable by a newer one.
+        """
+        self._messages = list(messages)
+        if session_id:
+            self._session_id = session_id
+
     def send(self, question: str) -> AnswerResult:
         """Send a question, updating the conversation history in place."""
         self._messages.append(HumanMessage(question))

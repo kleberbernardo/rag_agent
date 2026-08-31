@@ -27,6 +27,22 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Session storage. Without it the chat endpoint keeps conversations in the
+  # process that served them, so a second replica would not see them and a
+  # restart would forget them.
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build: .
     image: rag-agent:local
@@ -38,12 +54,18 @@ services:
         # Without service_healthy the CLI would start before Chroma answers
         # and fail on the first command.
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?defina OPENAI_API_KEY no ambiente ou num arquivo .env}
       KNOWLEDGE_DOMAIN: ${KNOWLEDGE_DOMAIN:-regulação do mercado de capitais brasileiro (resoluções da CVM)}
       VECTOR_STORE_MODE: server
       CHROMA_HOST: chroma
       CHROMA_PORT: "8000"
+      SESSION_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      # Optional. Set it and every request needs the X-API-Key header.
+      API_KEY: ${API_KEY:-}
       # Optional. Compose reads these from your .env; empty means no tracing.
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
@@ -55,3 +77,4 @@ services:
 
 volumes:
   chroma-data:
+  redis-data:

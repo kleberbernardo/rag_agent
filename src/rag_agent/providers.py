@@ -18,6 +18,10 @@ def build_chat_model() -> ChatOpenAI:
         model=settings.chat_model,
         temperature=settings.temperature,
         api_key=settings.openai_api_key,
+        # A 429 or a brief outage is a normal condition for a hosted model.
+        # Retrying with backoff keeps it from reaching the caller as an error.
+        max_retries=settings.max_retries,
+        timeout=settings.request_timeout_seconds,
     )
 
 
@@ -31,4 +35,6 @@ def build_embeddings() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         api_key=settings.openai_api_key,
+        max_retries=settings.max_retries,
+        timeout=settings.request_timeout_seconds,
     )

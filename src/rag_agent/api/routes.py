@@ -25,7 +25,7 @@ from rag_agent.api.schemas import (
     HealthResponse,
     StatusResponse,
 )
-from rag_agent.api.sessions import SessionStore
+from rag_agent.api.sessions import RedisSessionStore, SessionStore
 from rag_agent.config import Settings, get_settings
 from rag_agent.evaluation.metrics import extract_retrieved_sources
 from rag_agent.indexing import VectorStoreUnavailableError, count_documents, describe_location
@@ -122,6 +122,12 @@ def chat(payload: ChatRequest, sessions: SessionsDep) -> AnswerResponse:
 
     session_id, session = sessions.get_or_create(payload.session_id)
     result = session.send(payload.question)
+
+    # Redis holds a copy, not the object: mutating the session here does not
+    # update what the next replica will read.
+    if isinstance(sessions, RedisSessionStore):
+        sessions.save(session_id, session)
+
     flush()
 
     return AnswerResponse.from_result(

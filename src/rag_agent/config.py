@@ -19,6 +19,13 @@ class ChunkStrategy(StrEnum):
     ARTICLES = "articles"
 
 
+class SessionBackend(StrEnum):
+    """Where chat conversations are kept between requests."""
+
+    MEMORY = "memory"
+    REDIS = "redis"
+
+
 class VectorStoreMode(StrEnum):
     """Where the vector store lives."""
 
@@ -92,9 +99,26 @@ class Settings(BaseSettings):
     chroma_port: int = Field(default=8000, gt=0, le=65535)
     collection_name: str = Field(default="rag_agent_docs")
 
+    session_backend: SessionBackend = Field(default=SessionBackend.MEMORY)
+    redis_url: str = Field(default="redis://localhost:6379/0")
+    session_ttl_seconds: int = Field(default=3600, gt=0)
+
+    # Empty means the API is open. Set it and every request needs the header.
+    api_key: SecretStr = Field(default=SecretStr(""))
+
+    # A rate-limited or briefly unavailable provider is a normal condition,
+    # not a failure to hand back to the caller.
+    max_retries: int = Field(default=3, ge=0, le=10)
+    request_timeout_seconds: float = Field(default=60.0, gt=0)
+
     langfuse_public_key: SecretStr = Field(default=SecretStr(""))
     langfuse_secret_key: SecretStr = Field(default=SecretStr(""))
     langfuse_host: str = Field(default="https://cloud.langfuse.com")
+
+    @property
+    def auth_required(self) -> bool:
+        """Whether callers must present an API key."""
+        return bool(self.api_key.get_secret_value())
 
     @property
     def tracing_enabled(self) -> bool:

@@ -45,6 +45,14 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_HOST",
+        "LANGSMITH_TRACING",
+        "LANGSMITH_API_KEY",
+        "SESSION_BACKEND",
+        "REDIS_URL",
+        "SESSION_TTL_SECONDS",
+        "API_KEY",
+        "MAX_RETRIES",
+        "REQUEST_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(variable, raising=False)
 

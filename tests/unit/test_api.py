@@ -6,16 +6,17 @@ model. A test that spends tokens is a test nobody runs.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from rag_agent.api import FeedbackStore, create_app
-from rag_agent.api.sessions import SessionStore
+from rag_agent.api import FeedbackStore, InMemorySessionStore, RedisSessionStore, create_app
+from rag_agent.config import get_settings
 from rag_agent.types import AnswerResult, RunMetrics, ToolCall
 
 SOURCE = "cvm-resolucao-160-ofertas-publicas.pdf"
@@ -77,7 +78,7 @@ def client(indexed: None) -> Iterator[TestClient]:
     app = create_app()
     with TestClient(app) as test_client:
         # Replace the store built at startup with one that fakes the agent.
-        test_client.app.state.sessions = SessionStore(factory=FakeSession)  # type: ignore[attr-defined,arg-type]
+        test_client.app.state.sessions = InMemorySessionStore(factory=FakeSession)  # type: ignore[attr-defined,arg-type]
         yield test_client
 
 
@@ -199,10 +200,10 @@ class TestChat:
         assert client.delete("/chat/nao-existe").status_code == 404
 
 
-class TestSessionStore:
+class TestInMemorySessionStore:
     def test_an_unknown_id_opens_a_new_conversation(self) -> None:
         """A client holding an id from before a restart should keep working."""
-        store = SessionStore(factory=FakeSession)  # type: ignore[arg-type]
+        store = InMemorySessionStore(factory=FakeSession)  # type: ignore[arg-type]
 
         returned_id, _ = store.get_or_create("id-de-antes-do-restart")
 
@@ -210,7 +211,7 @@ class TestSessionStore:
         assert len(store) == 1
 
     def test_the_same_id_returns_the_same_conversation(self) -> None:
-        store = SessionStore(factory=FakeSession)  # type: ignore[arg-type]
+        store = InMemorySessionStore(factory=FakeSession)  # type: ignore[arg-type]
         _, first = store.get_or_create("s1")
         _, second = store.get_or_create("s1")
 
@@ -218,7 +219,7 @@ class TestSessionStore:
 
     def test_the_oldest_session_is_evicted_at_the_cap(self) -> None:
         """Unbounded session storage is a memory leak with a friendly name."""
-        store = SessionStore(max_sessions=2, factory=FakeSession)  # type: ignore[arg-type]
+        store = InMemorySessionStore(max_sessions=2, factory=FakeSession)  # type: ignore[arg-type]
         store.get_or_create("a")
         store.get_or_create("b")
         store.get_or_create("c")
@@ -228,7 +229,7 @@ class TestSessionStore:
         assert store.drop("c") is True
 
     def test_using_a_session_keeps_it_from_being_evicted(self) -> None:
-        store = SessionStore(max_sessions=2, factory=FakeSession)  # type: ignore[arg-type]
+        store = InMemorySessionStore(max_sessions=2, factory=FakeSession)  # type: ignore[arg-type]
         store.get_or_create("a")
         store.get_or_create("b")
         store.get_or_create("a")
@@ -322,3 +323,146 @@ class TestFeedbackStore:
             thread.join()
 
         assert len(store.read_all()) == 20
+
+
+class FakeRedis:
+    """A Redis stand-in: the four calls the store makes, nothing more."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, bytes] = {}
+        self.ttls: dict[str, int] = {}
+
+    def setex(self, key: str, ttl: int, value: str | bytes) -> None:
+        self.values[key] = value.encode() if isinstance(value, str) else value
+        self.ttls[key] = ttl
+
+    def get(self, key: str) -> bytes | None:
+        return self.values.get(key)
+
+    def delete(self, key: str) -> int:
+        return 1 if self.values.pop(key, None) is not None else 0
+
+    def keys(self, pattern: str) -> list[str]:
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
+
+
+class RestorableSession:
+    """A fake session that can be reloaded from stored messages."""
+
+    def __init__(self) -> None:
+        self._messages: list[Any] = []
+
+    @property
+    def messages(self) -> list[Any]:
+        return list(self._messages)
+
+    def restore(self, messages: list[Any], session_id: str | None = None) -> None:
+        self._messages = list(messages)
+
+    def send(self, question: str) -> AnswerResult:
+        self._messages.append(HumanMessage(question))
+        return build_result("resposta")
+
+
+class TestRedisSessionStore:
+    """What Redis buys: a conversation outliving the process that started it."""
+
+    def store(self, client: FakeRedis | None = None) -> RedisSessionStore:
+        return RedisSessionStore(
+            client or FakeRedis(),
+            ttl_seconds=60,
+            factory=RestorableSession,  # type: ignore[arg-type]
+        )
+
+    def test_a_new_conversation_is_written_immediately(self) -> None:
+        client = FakeRedis()
+
+        session_id, _ = self.store(client).get_or_create(None)
+
+        assert f"rag:session:{session_id}" in client.values
+
+    def test_a_conversation_survives_a_new_store(self) -> None:
+        """A restarted process reads what the previous one wrote."""
+        client = FakeRedis()
+        session_id, session = self.store(client).get_or_create(None)
+        session.send("primeira")
+        self.store(client).save(session_id, session)
+
+        _, reloaded = self.store(client).get_or_create(session_id)
+
+        assert [m.content for m in reloaded.messages] == ["primeira"]
+
+    def test_only_the_messages_are_stored(self) -> None:
+        """The graph holds closures that cannot be serialised, and need not be."""
+        client = FakeRedis()
+        session_id, session = self.store(client).get_or_create(None)
+        session.send("pergunta")
+        self.store(client).save(session_id, session)
+
+        stored = json.loads(client.values[f"rag:session:{session_id}"])
+
+        assert list(stored) == ["messages"]
+
+    def test_every_write_refreshes_the_expiry(self) -> None:
+        client = FakeRedis()
+
+        session_id, _ = self.store(client).get_or_create(None)
+
+        assert client.ttls[f"rag:session:{session_id}"] == 60
+
+    def test_an_unknown_id_opens_a_new_conversation(self) -> None:
+        returned_id, _ = self.store().get_or_create("id-de-antes-do-restart")
+
+        assert returned_id == "id-de-antes-do-restart"
+
+    def test_unreadable_data_is_discarded_rather_than_raised(self) -> None:
+        client = FakeRedis()
+        client.values["rag:session:corrompida"] = b"nao e json"
+
+        _, session = self.store(client).get_or_create("corrompida")
+
+        assert session.messages == []
+
+    def test_a_dropped_conversation_is_gone(self) -> None:
+        client = FakeRedis()
+        session_id, _ = self.store(client).get_or_create(None)
+
+        assert self.store(client).drop(session_id) is True
+        assert self.store(client).drop(session_id) is False
+
+
+class TestAuthentication:
+    """A service that spends money per request cannot be open to the port."""
+
+    @pytest.fixture
+    def secured(self, monkeypatch: pytest.MonkeyPatch, indexed: None) -> Iterator[TestClient]:
+        monkeypatch.setenv("API_KEY", "chave-secreta")
+        get_settings.cache_clear()
+        with TestClient(create_app()) as client:
+            client.app.state.sessions = InMemorySessionStore(factory=FakeSession)  # type: ignore[attr-defined,arg-type]
+            yield client
+
+    def test_no_key_configured_leaves_the_api_open(self, client: TestClient) -> None:
+        """`rag serve` has to work on a laptop without ceremony."""
+        assert client.get("/health").status_code == 200
+
+    def test_a_request_without_the_header_is_rejected(self, secured: TestClient) -> None:
+        assert secured.get("/health").status_code == 401
+
+    def test_a_wrong_key_is_rejected(self, secured: TestClient) -> None:
+        response = secured.get("/health", headers={"X-API-Key": "errada"})
+
+        assert response.status_code == 401
+
+    def test_the_right_key_is_accepted(self, secured: TestClient) -> None:
+        response = secured.get("/health", headers={"X-API-Key": "chave-secreta"})
+
+        assert response.status_code == 200
+
+    def test_it_protects_the_endpoints_that_cost_money(self, secured: TestClient) -> None:
+        assert secured.post("/ask", json={"question": "q"}).status_code == 401
+        assert secured.post("/chat", json={"question": "q"}).status_code == 401
+
+    def test_the_rejection_says_which_header_to_send(self, secured: TestClient) -> None:
+        assert "X-API-Key" in secured.get("/health").json()["detail"]

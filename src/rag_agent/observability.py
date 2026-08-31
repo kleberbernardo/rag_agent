@@ -12,6 +12,7 @@ application down with it is worse than none.
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from typing import Any
 
@@ -98,6 +99,42 @@ def build_run_config(*, session_id: str) -> dict[str, Any]:
         "retrieval_k": settings.retrieval_k,
     }
     return config
+
+
+def record_score(*, trace_id: str, name: str, value: bool, comment: str | None = None) -> bool:
+    """Attach a score to a trace. Returns whether it was sent.
+
+    This is the platform's own mechanism for human judgement on a run, so the
+    verdict lands next to the prompt, the retrieved passages and the cost
+    rather than in a file nobody correlates with them.
+    """
+    client = _client()
+    if client is None or not trace_id:
+        return False
+
+    try:
+        client.create_score(
+            name=name,
+            value=value,
+            trace_id=trace_id,
+            data_type="BOOLEAN",
+            comment=comment,
+        )
+    except Exception:
+        logger.warning("Could not record the score in Langfuse.", exc_info=True)
+        return False
+
+    return True
+
+
+def langsmith_enabled() -> bool:
+    """Whether LangChain is also exporting traces to LangSmith.
+
+    Nothing here turns it on. LangChain instruments itself when LANGSMITH_
+    variables are present, so the setting is reported rather than applied.
+    """
+    tracing = os.environ.get("LANGSMITH_TRACING", "").lower() in {"true", "1"}
+    return tracing and bool(os.environ.get("LANGSMITH_API_KEY"))
 
 
 def flush() -> None:
