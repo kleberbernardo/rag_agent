@@ -45,6 +45,8 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_HOST",
+        "PROMPT_LABEL",
+        "PROMPT_CACHE_SECONDS",
         "LANGSMITH_TRACING",
         "LANGSMITH_API_KEY",
         "SESSION_BACKEND",

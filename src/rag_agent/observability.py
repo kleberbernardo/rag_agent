@@ -127,6 +127,62 @@ def record_score(*, trace_id: str, name: str, value: bool, comment: str | None =
     return True
 
 
+def fetch_prompt(name: str, *, label: str, fallback: str) -> tuple[str, int | None]:
+    """Read a prompt from Langfuse, or fall back to the text shipped in code.
+
+    Returns the template and the version it came from, with None meaning the
+    fallback was used. The SDK caches for `prompt_cache_seconds`, so a request
+    does not pay a round trip, and it takes the fallback itself when the
+    platform cannot be reached: a prompt store that can stop the agent from
+    answering is worse than no prompt store.
+    """
+    client = _client()
+    if client is None:
+        return fallback, None
+
+    try:
+        prompt = client.get_prompt(
+            name,
+            label=label,
+            fallback=fallback,
+            cache_ttl_seconds=get_settings().prompt_cache_seconds,
+        )
+    except Exception:
+        logger.warning("Could not fetch the prompt %r from Langfuse.", name, exc_info=True)
+        return fallback, None
+
+    # is_fallback tells the two apart: the SDK returns the fallback as a prompt
+    # object, so a truthy result is not proof that the platform answered.
+    if getattr(prompt, "is_fallback", False):
+        return fallback, None
+
+    return str(prompt.prompt), prompt.version
+
+
+def publish_prompt(name: str, template: str, *, label: str, commit_message: str) -> int | None:
+    """Publish a prompt and give it the label the agent reads.
+
+    Returns the version created, or None when tracing is off.
+    """
+    client = _client()
+    if client is None:
+        return None
+
+    try:
+        prompt = client.create_prompt(
+            name=name,
+            prompt=template,
+            labels=[label],
+            type="text",
+            commit_message=commit_message,
+        )
+    except Exception:
+        logger.warning("Could not publish the prompt %r.", name, exc_info=True)
+        return None
+
+    return int(prompt.version)
+
+
 def langsmith_enabled() -> bool:
     """Whether LangChain is also exporting traces to LangSmith.
 

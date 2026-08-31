@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     max_retries: int = Field(default=3, ge=0, le=10)
     request_timeout_seconds: float = Field(default=60.0, gt=0)
 
+    # Which published version the agent picks up. Moving this label in the
+    # Langfuse UI is how a prompt is deployed or rolled back.
+    prompt_label: str = Field(default="production", min_length=1)
+    prompt_cache_seconds: int = Field(default=60, ge=0)
+
     langfuse_public_key: SecretStr = Field(default=SecretStr(""))
     langfuse_secret_key: SecretStr = Field(default=SecretStr(""))
     langfuse_host: str = Field(default="https://cloud.langfuse.com")

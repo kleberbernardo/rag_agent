@@ -41,6 +41,13 @@ from rag_agent.indexing import (
 )
 from rag_agent.logging_setup import setup_logging
 from rag_agent.observability import flush as flush_traces
+from rag_agent.observability import publish_prompt
+from rag_agent.prompts import (
+    PUBLISHED_PROMPTS,
+    build_search_tool_description,
+    build_system_prompt,
+    describe_source,
+)
 from rag_agent.types import AnswerResult, RunMetrics
 
 app = typer.Typer(
@@ -77,6 +84,72 @@ ReloadOption = typer.Option(False, "--reload", help="Reinicia ao salvar arquivo 
 ResetOption = typer.Option(
     False, "--reset", help="Apaga o índice antes de indexar. Use ao trocar de estratégia."
 )
+
+
+prompt_app = typer.Typer(
+    add_completion=False,
+    help="Gerencia os prompts publicados no Langfuse.",
+)
+app.add_typer(prompt_app, name="prompt")
+
+CommitMessageOption = typer.Option(
+    "publicado pela CLI", "--message", "-m", help="Mensagem da versão."
+)
+
+
+@prompt_app.command("show")
+def prompt_show(verbose: bool = VerboseOption) -> None:
+    """Mostra o prompt em vigor e de onde ele veio."""
+    setup_logging(verbose=verbose)
+    settings = get_settings()
+    source, version = describe_source()
+
+    origem = f"Langfuse v{version}" if version is not None else "código local"
+    console.print(f"[bold]origem      [/] {origem}")
+    console.print(f"[bold]label       [/] {settings.prompt_label}")
+    console.print(f"[bold]domínio     [/] {settings.knowledge_domain}")
+
+    console.print(Panel(escape(build_system_prompt()), title="system", border_style="cyan"))
+    console.print(
+        Panel(
+            escape(build_search_tool_description()),
+            title="search_documentation",
+            border_style="dim",
+        )
+    )
+
+    if source == "local":
+        console.print(
+            "[dim]Publique com [/]rag prompt push[dim] para poder versionar e "
+            "trocar sem novo deploy."
+        )
+
+
+@prompt_app.command("push")
+def prompt_push(
+    message: str = CommitMessageOption,
+    verbose: bool = VerboseOption,
+) -> None:
+    """Publica os prompts locais no Langfuse, sob o label configurado."""
+    setup_logging(verbose=verbose)
+    settings = get_settings()
+
+    if not settings.tracing_enabled:
+        console.print("[yellow]Langfuse não configurado. Nada a publicar.")
+        raise typer.Exit(code=1)
+
+    for name, template in PUBLISHED_PROMPTS.items():
+        version = publish_prompt(
+            name, template, label=settings.prompt_label, commit_message=message
+        )
+        if version is None:
+            console.print(f"[red]falhou[/] {name}")
+            raise typer.Exit(code=1)
+        console.print(f"[green]OK[/] {name} v{version} ({settings.prompt_label})")
+
+    console.print(
+        f"[dim]Edite no Langfuse e mova o label {settings.prompt_label} para trocar de versão."
+    )
 
 
 @app.command()

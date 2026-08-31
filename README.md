@@ -72,7 +72,7 @@ back out, and nothing else.
 | Capabilities | `tools/` | What the model may call. |
 | Retrieval | `indexing/` | Load, split, embed, search. |
 | Providers | `providers.py` | The only place OpenAI appears. |
-| Behaviour | `prompts.py` | The rules, rendered per domain. |
+| Behaviour | `prompts.py` | The rules, fetched from Langfuse or read from code. |
 | Measurement | `evaluation/` | Grade the agent against known answers. |
 
 ---
@@ -376,6 +376,8 @@ message rather than failing mid-query.
 | `LANGFUSE_PUBLIC_KEY` | none | Optional. Enables tracing when set together with the secret key. |
 | `LANGFUSE_SECRET_KEY` | none | Optional. See [Observability](#observability). |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse region, e.g. `https://us.cloud.langfuse.com`. |
+| `PROMPT_LABEL` | `production` | Which published prompt version the agent picks up. |
+| `PROMPT_CACHE_SECONDS` | `60` | How long a fetched prompt is reused. |
 | `SESSION_BACKEND` | `memory` | `memory` keeps conversations in the process; `redis` shares them. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Where Redis lives, in `redis` mode. |
 | `SESSION_TTL_SECONDS` | `3600` | How long an idle conversation survives. |
@@ -527,7 +529,7 @@ Everything else is a single module.
 | To change... | Edit |
 |---|---|
 | The knowledge base | `data/`, then `rag ingest` |
-| How the agent behaves | `prompts.py` |
+| How the agent behaves | Langfuse, or `prompts.py` as the fallback |
 | Add a tool | `tools/` |
 | Chunking or retrieval | `.env` |
 | The model provider | `providers.py` |
@@ -667,6 +669,59 @@ Langfuse is the default because it is open source, self-hostable and
 independent of the framework, while LangSmith is easier to switch on and bound
 more tightly to LangChain. Use one or the other: sending the same run to two
 platforms means two places to look at the same data.
+
+---
+
+## Prompt management
+
+The prompt decides how the agent behaves, and it changes far more often than
+the code around it. Kept as a string in the source, every wording change costs
+a commit, a build and a deploy, and no record survives of which text produced
+which score.
+
+Published to Langfuse, it becomes a versioned asset:
+
+```bash
+rag prompt push -m "regra nova sobre citação"   # publish under the label
+rag prompt show                                 # what is in force, and where from
+```
+
+```
+$ rag prompt show
+origem       Langfuse v1
+label        production
+domínio      regulacao do mercado de capitais brasileiro (resolucoes da CVM)
+╭─ system ────────────────────────────────────────────────────╮
+│ Você é um assistente especializado em regulacao do mercado  │
+│ de capitais brasileiro (resolucoes da CVM).                 │
+...
+```
+
+Editing the text in the Langfuse UI and moving the `production` label is how a
+new version reaches the agent. Rolling back is moving the label to the previous
+one. Neither touches the repository.
+
+### It never blocks an answer
+
+Without Langfuse configured, the templates in `prompts.py` are used and
+everything works. With Langfuse configured but unreachable, the same templates
+are used and a warning is logged. A prompt store that can stop the agent from
+answering is worse than no prompt store.
+
+The SDK caches for `PROMPT_CACHE_SECONDS`, so a request does not pay a round
+trip to fetch text that rarely changes.
+
+### One placeholder syntax
+
+Templates use `{{domain}}`, the form Langfuse compiles, on both paths. The
+local text is therefore published verbatim, and the same string renders whether
+it came from the platform or from the file.
+
+### Recorded with the score
+
+Every evaluation report carries `prompt_source` and `prompt_version` alongside
+the model and the chunking. A run graded against version 3 cannot be compared
+to one graded against version 4, and now the report says which was in force.
 
 ---
 

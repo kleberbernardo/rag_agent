@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from rag_agent.config import get_settings
-from rag_agent.prompts import build_system_prompt
+from rag_agent.prompts import build_system_prompt, describe_source
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,8 @@ class RunConfiguration:
     article_max_chars: int
     retrieval_k: int
     prompt_hash: str
+    prompt_source: str
+    prompt_version: int | None
     prompt: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,6 +53,7 @@ def capture_configuration() -> RunConfiguration:
     """Snapshot the active settings and the prompt they render."""
     settings = get_settings()
     prompt = build_system_prompt()
+    source, version = describe_source()
 
     return RunConfiguration(
         model=settings.chat_model,
@@ -63,6 +66,8 @@ def capture_configuration() -> RunConfiguration:
         article_max_chars=settings.article_max_chars,
         retrieval_k=settings.retrieval_k,
         prompt_hash=hash_prompt(prompt),
+        prompt_source=source,
+        prompt_version=version,
         prompt=prompt,
     )
 
