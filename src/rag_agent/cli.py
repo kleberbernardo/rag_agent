@@ -34,6 +34,7 @@ from rag_agent.evaluation import (
     run_evaluation,
     run_experiment,
     save_report,
+    summarise,
     sync_dataset,
 )
 from rag_agent.indexing import (
@@ -63,6 +64,17 @@ console = Console()
 
 _EMPTY_INDEX_HINT = "[yellow]O índice está vazio. Rode primeiro:[/] rag ingest"
 _EXIT_WORDS = frozenset({"sair", "exit", "quit"})
+
+# One description per metric, so the local table and the platform table say
+# the same thing about the same number.
+_METRIC_LABELS = {
+    "retrieval": "trouxe o documento certo",
+    "citacao": "citou a fonte certa",
+    "fato": "o número ou termo esperado apareceu",
+    "recusa": "admitiu não saber, fora do corpus",
+    "fundamentacao": "todo número saiu do que ele leu",
+    "juiz": "fiel aos trechos e completa",
+}
 
 VerboseOption = typer.Option(False, "--verbose", "-v", help="Mostra logs detalhados.")
 TraceOption = typer.Option(False, "--trace", "-t", help="Mostra o raciocínio do agente.")
@@ -164,11 +176,18 @@ def prompt_push(
 
 dataset_app = typer.Typer(
     add_completion=False,
-    help="Publica o dataset de avaliação no Langfuse e roda experimentos lá.",
+    help="Publica o dataset de avaliação no Langfuse.",
 )
 app.add_typer(dataset_app, name="dataset")
 
-RunNameOption = typer.Option(None, "--name", "-n", help="Nome da execução. O padrão é a data.")
+LangfuseOption = typer.Option(
+    False,
+    "--langfuse",
+    help="Registra a execução no Langfuse em vez de gravar um relatório local.",
+)
+RunNameOption = typer.Option(
+    None, "--name", help="Nome da execução no Langfuse. O padrão é modelo, k e data."
+)
 
 
 @dataset_app.command("push")
@@ -185,39 +204,6 @@ def dataset_push(
 
     console.print(f"[green]OK[/] {total} item(ns) em [bold]{DATASET_NAME}[/]")
     console.print("[dim]O arquivo continua no git: dataset versionado com o código é o padrão.")
-
-
-@dataset_app.command("run")
-def dataset_run(
-    name: str | None = RunNameOption,
-    judge: bool = JudgeOption,
-    verbose: bool = VerboseOption,
-) -> None:
-    """Roda o dataset como experimento no Langfuse, com os traces e as notas lá."""
-    setup_logging(verbose=verbose)
-    _require_index()
-
-    settings = get_settings()
-    run_name = name or f"{settings.chat_model}-k{settings.retrieval_k}-{_today()}"
-    configuration = capture_configuration().to_dict()
-    configuration.pop("prompt")
-
-    with console.status(f"[cyan]Rodando o experimento {run_name}..."):
-        result = _with_langfuse(
-            lambda: run_experiment(
-                name=run_name,
-                description=f"chunking {settings.chunk_strategy.value}, k={settings.retrieval_k}",
-                metadata=configuration,
-                with_judge=judge,
-            )
-        )
-
-    console.print(f"[green]OK[/] experimento [bold]{run_name}[/]")
-
-    url = getattr(result, "dataset_run_url", None)
-    if url:
-        console.print(f"[dim]{url}")
-    console.print("[dim]Compare execuções na aba Datasets do Langfuse.")
 
 
 def _today() -> str:
@@ -354,6 +340,8 @@ def eval_command(
     min_score: float = MinScoreOption,
     max_cost: float = MaxCostOption,
     judge: bool = JudgeOption,
+    langfuse: bool = LangfuseOption,
+    name: str | None = RunNameOption,
     verbose: bool = VerboseOption,
 ) -> None:
     """Mede o agente contra perguntas cuja resposta é conhecida."""
@@ -363,6 +351,10 @@ def eval_command(
     cases = load_dataset(dataset)
     if limit > 0:
         cases = cases[:limit]
+
+    if langfuse:
+        _evaluate_on_langfuse(name=name, with_judge=judge, min_score=min_score)
+        return
 
     scores: list[CaseScore] = []
     with console.status(f"[cyan]Avaliando {len(cases)} caso(s)...") as spinner:
@@ -400,6 +392,71 @@ def eval_command(
         # "90% < 90%" as the reason for a failure helps nobody.
         console.print(f"\n[red]abaixo do limiar:[/] {overall:.1%} < {min_score:.1%}")
         raise typer.Exit(code=1)
+
+
+def _evaluate_on_langfuse(*, name: str | None, with_judge: bool, min_score: float) -> None:
+    """Run the same suite on the platform, and report it the same way here.
+
+    Langfuse keeps the detail and the comparison; the terminal still gets the
+    table, because having to open a browser to learn whether the suite passed
+    is a worse trade than the history is worth.
+    """
+    settings = get_settings()
+    run_name = name or f"{settings.chat_model}-k{settings.retrieval_k}-{_today()}"
+    configuration = capture_configuration().to_dict()
+    configuration.pop("prompt")
+
+    with console.status(f"[cyan]Avaliando no Langfuse: {run_name}..."):
+        result = _with_langfuse(
+            lambda: run_experiment(
+                name=run_name,
+                description=f"chunking {settings.chunk_strategy.value}, k={settings.retrieval_k}",
+                metadata=configuration,
+                with_judge=with_judge,
+            )
+        )
+
+    counts = summarise(result)
+    _render_counts(counts, run_name)
+
+    url = getattr(result, "dataset_run_url", None)
+    if url:
+        console.print(f"[dim]{url}")
+
+    overall = _overall_of(counts)
+    if overall < min_score:
+        console.print(f"\n[red]abaixo do limiar:[/] {overall:.1%} < {min_score:.1%}")
+        raise typer.Exit(code=1)
+
+
+def _render_counts(counts: dict[str, tuple[int, int]], run_name: str) -> None:
+    """The same table the local run prints, built from the platform's result."""
+    table = Table(title=f"avaliação · {run_name}", border_style="cyan")
+    table.add_column("métrica")
+    table.add_column("resultado", justify="right")
+    table.add_column("o que mede", style="dim")
+
+    for metric, description in _METRIC_LABELS.items():
+        if metric not in counts:
+            continue
+        passed, total = counts[metric]
+        table.add_row(metric, f"{passed / total:.0%}" if total else "n/a", description)
+
+    passed, total = _totals(counts)
+    table.add_row("geral", f"{passed / total:.0%}" if total else "n/a", "notas positivas no total")
+    console.print(table)
+
+
+def _overall_of(counts: dict[str, tuple[int, int]]) -> float:
+    passed, total = _totals(counts)
+    return passed / total if total else 0.0
+
+
+def _totals(counts: dict[str, tuple[int, int]]) -> tuple[int, int]:
+    return (
+        sum(passed for passed, _ in counts.values()),
+        sum(total for _, total in counts.values()),
+    )
 
 
 def _render_report(report: EvalReport) -> None:

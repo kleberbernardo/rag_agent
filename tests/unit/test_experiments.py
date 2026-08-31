@@ -228,3 +228,63 @@ class TestEvaluators:
         assert experiments._retrieval(output=output(), expected_output=expected(source=None)) == []
         assert experiments._refusal(output=output(), expected_output=expected()) == []
         assert experiments._grounded(output=output(groundedness=None)) == []
+
+
+class FakeEvaluation:
+    def __init__(self, name: str, value: float | None) -> None:
+        self.name = name
+        self.value = value
+
+
+class FakeItemResult:
+    def __init__(self, *evaluations: FakeEvaluation) -> None:
+        self.evaluations = list(evaluations)
+
+
+class FakeExperimentResult:
+    def __init__(self, *items: FakeItemResult) -> None:
+        self.item_results = list(items)
+
+
+class TestSummarise:
+    """The platform keeps the detail; the terminal still gets the table.
+
+    Having to open a browser to learn whether the suite passed is a worse
+    trade than the history is worth.
+    """
+
+    def test_it_counts_passes_per_metric(self) -> None:
+        result = FakeExperimentResult(
+            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("fato", 1)),
+            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("fato", 0)),
+        )
+
+        assert experiments.summarise(result) == {"retrieval": (2, 2), "fato": (1, 2)}
+
+    def test_a_metric_that_did_not_apply_is_counted_in_neither(self) -> None:
+        """Skipped is not failed, the same as everywhere else."""
+        result = FakeExperimentResult(
+            FakeItemResult(FakeEvaluation("recusa", 1)),
+            FakeItemResult(FakeEvaluation("recusa", None)),
+        )
+
+        assert experiments.summarise(result) == {"recusa": (1, 1)}
+
+    def test_it_reads_evaluations_given_as_dictionaries(self) -> None:
+        """The SDK hands back either shape depending on the path taken."""
+
+        class DictItem:
+            def __init__(self) -> None:
+                self.evaluations = [{"name": "juiz", "value": 0}]
+
+        class DictResult:
+            def __init__(self) -> None:
+                self.item_results = [DictItem()]
+
+        assert experiments.summarise(DictResult()) == {"juiz": (0, 1)}
+
+    def test_a_result_with_no_items_summarises_to_nothing(self) -> None:
+        assert experiments.summarise(FakeExperimentResult()) == {}
+
+    def test_it_survives_a_result_without_item_results(self) -> None:
+        assert experiments.summarise(object()) == {}

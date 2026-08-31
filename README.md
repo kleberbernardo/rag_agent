@@ -223,6 +223,78 @@ project root without the `rag` command.
 
 ---
 
+## Commands
+
+Eight commands. Three of them are what you use daily.
+
+| Command | What it does |
+|---|---|
+| `rag ingest` | Read `data/`, split it, index it. Run it once, and again when the documents change. |
+| `rag ask "..."` | One question. |
+| `rag chat` | A conversation with memory. |
+| `rag status` | The active configuration and how many chunks are indexed. |
+| `rag eval` | Grade the agent against the 29 questions. |
+| `rag serve` | Start the HTTP API. |
+| `rag prompt show` \| `push` | Read the prompt in force; publish the local ones. |
+| `rag dataset push` | Upload the evaluation dataset to Langfuse. |
+
+### `rag eval` in full
+
+One command grades the agent. Where the result goes is a flag, not a second
+command:
+
+```bash
+rag eval                        # summary in the terminal, report in evals/results/
+rag eval --langfuse             # same summary, recorded on the platform
+```
+
+| Flag | Effect |
+|---|---|
+| `--langfuse` | Record the run in Langfuse instead of writing a local report |
+| `--judge` | Add the model that reads the sentence. Costs tokens. |
+| `--limit N` | Only the first N cases |
+| `--min-score 0.9` | Exit non-zero below this |
+| `--max-cost 0.05` | Exit non-zero above this |
+| `--compare <report>` | Diff against a previous local report |
+| `--name` | Name the run on the platform |
+
+Both paths print the same table, because having to open a browser to learn
+whether the suite passed is a worse trade than the history is worth:
+
+```
+                    avaliação · unificado-teste
+┌───────────────┬───────────┬─────────────────────────────────────┐
+│ métrica       │ resultado │ o que mede                          │
+├───────────────┼───────────┼─────────────────────────────────────┤
+│ retrieval     │      100% │ trouxe o documento certo            │
+│ citacao       │      100% │ citou a fonte certa                 │
+│ fato          │       96% │ o número ou termo esperado apareceu │
+│ recusa        │       75% │ admitiu não saber, fora do corpus   │
+│ fundamentacao │      100% │ todo número saiu do que ele leu     │
+│ juiz          │       89% │ fiel aos trechos e completa         │
+│ geral         │       96% │ notas positivas no total            │
+└───────────────┴───────────┴─────────────────────────────────────┘
+https://us.cloud.langfuse.com/.../runs/2bf9bb79
+```
+
+### Reading it in Langfuse
+
+Three places hold the same run, at different resolutions:
+
+| Where | What you see |
+|---|---|
+| **Experiments** | One row per question, the metrics as columns. Start here. |
+| **Scores** | One row per metric per question, raw. 29 × 6 rows, not a summary. |
+| **Tracing** | One question in full: the search, the passages, the tool calls, the cost. |
+
+The **Evaluators** menu stays empty on purpose. It holds judges that Langfuse
+runs on its own servers over live traffic, configured through a form. This
+project's judge lives in `evaluation/judge.py`, so its rubric is versioned,
+testable and readable in the repository, and it runs offline. The two are
+different features that share a word.
+
+---
+
 ## Usage
 
 All commands below assume the environment is active.
@@ -1089,7 +1161,7 @@ Catching that needs something that reads:
 
 ```bash
 rag eval --judge                    # locally
-rag dataset run --judge             # as an experiment
+rag eval --langfuse --judge         # on the platform
 ```
 
 A second model receives the question, the passages the agent actually read, and
@@ -1131,8 +1203,8 @@ offers is a command reading two files.
 Pushing the dataset to Langfuse turns each run into a tracked experiment:
 
 ```bash
-rag dataset push                          # send the questions to Langfuse
-rag dataset run --name articles-k8        # run them there
+rag dataset push          # send the questions to Langfuse
+rag eval --langfuse       # run them there
 ```
 
 Every case gets its own trace, the five metrics hang off it as scores, and two
@@ -1140,11 +1212,8 @@ runs sit side by side in a UI built for that comparison. The run carries the
 configuration as metadata, so a score is never separated from the settings that
 produced it.
 
-```
-$ rag dataset run --name articles-k8
-OK experimento articles-k8
-https://us.cloud.langfuse.com/project/.../datasets/.../runs/8b5490cf
-```
+The run carries the configuration as metadata, and the terminal prints the
+same table it prints locally.
 
 The dataset file stays in git. A dataset versioned alongside the code is what
 makes a score reproducible, and it is the standard: the questions change with

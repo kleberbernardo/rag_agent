@@ -13,6 +13,7 @@ from rag_agent.evaluation.experiments import (
     DATASET_NAME,
     LangfuseUnavailableError,
     run_experiment,
+    summarise,
     sync_dataset,
 )
 from rag_agent.evaluation.metrics import (
@@ -51,5 +52,6 @@ __all__ = [
     "run_experiment",
     "save_report",
     "score_case",
+    "summarise",
     "sync_dataset",
 ]

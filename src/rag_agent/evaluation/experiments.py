@@ -107,6 +107,46 @@ def run_experiment(
     )
 
 
+def summarise(result: Any) -> dict[str, tuple[int, int]]:
+    """Count passes per metric, so a platform run reports like a local one.
+
+    Langfuse keeps the detail in its UI and hands back a result object. Reading
+    it here means the same table appears at the end of the run either way, and
+    nobody has to open a browser to learn whether the suite passed.
+
+    Returns, per metric, how many passed out of how many applied. A metric that
+    did not apply is counted in neither, the same as everywhere else.
+    """
+    counts: dict[str, list[int]] = {}
+
+    for item in getattr(result, "item_results", []):
+        for evaluation in getattr(item, "evaluations", []) or []:
+            name = _name_of(evaluation)
+            value = _value_of(evaluation)
+            if name is None or value is None:
+                continue
+            tally = counts.setdefault(name, [0, 0])
+            tally[1] += 1
+            tally[0] += 1 if value >= 1 else 0
+
+    return {name: (passed, total) for name, (passed, total) in counts.items()}
+
+
+def _name_of(evaluation: Any) -> str | None:
+    if isinstance(evaluation, dict):
+        return evaluation.get("name")
+    return getattr(evaluation, "name", None)
+
+
+def _value_of(evaluation: Any) -> float | None:
+    value = (
+        evaluation.get("value")
+        if isinstance(evaluation, dict)
+        else getattr(evaluation, "value", None)
+    )
+    return None if value is None else float(value)
+
+
 def _answer(*, item: Any, **_: Any) -> dict[str, Any]:
     """The task under evaluation: one question, one answer.
 
