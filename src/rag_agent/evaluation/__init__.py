@@ -9,6 +9,12 @@ or worse.
 from rag_agent.evaluation.comparison import CaseChange, Change, Comparison, compare, load_report
 from rag_agent.evaluation.configuration import RunConfiguration, capture_configuration, hash_prompt
 from rag_agent.evaluation.dataset import DEFAULT_DATASET, EvalCase, load_dataset
+from rag_agent.evaluation.experiments import (
+    DATASET_NAME,
+    LangfuseUnavailableError,
+    run_experiment,
+    sync_dataset,
+)
 from rag_agent.evaluation.metrics import (
     CaseScore,
     error_score,
@@ -20,6 +26,7 @@ from rag_agent.evaluation.metrics import (
 from rag_agent.evaluation.runner import EvalReport, Rate, build_report, run_evaluation, save_report
 
 __all__ = [
+    "DATASET_NAME",
     "DEFAULT_DATASET",
     "CaseChange",
     "CaseScore",
@@ -27,6 +34,7 @@ __all__ = [
     "Comparison",
     "EvalCase",
     "EvalReport",
+    "LangfuseUnavailableError",
     "Rate",
     "RunConfiguration",
     "build_report",
@@ -40,6 +48,8 @@ __all__ = [
     "load_dataset",
     "load_report",
     "run_evaluation",
+    "run_experiment",
     "save_report",
     "score_case",
+    "sync_dataset",
 ]

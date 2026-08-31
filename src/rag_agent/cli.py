@@ -8,6 +8,7 @@ rag status              inspect the current configuration and index
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -19,16 +20,21 @@ from rich.table import Table
 from rag_agent.agent import ChatSession, ask, format_trace
 from rag_agent.config import PROJECT_ROOT, get_settings
 from rag_agent.evaluation import (
+    DATASET_NAME,
     DEFAULT_DATASET,
     CaseScore,
     Comparison,
     EvalReport,
+    LangfuseUnavailableError,
     build_report,
+    capture_configuration,
     compare,
     load_dataset,
     load_report,
     run_evaluation,
+    run_experiment,
     save_report,
+    sync_dataset,
 )
 from rag_agent.indexing import (
     VectorStoreUnavailableError,
@@ -149,6 +155,77 @@ def prompt_push(
     console.print(
         f"[dim]Edite no Langfuse e mova o label {settings.prompt_label} para trocar de versão."
     )
+
+
+dataset_app = typer.Typer(
+    add_completion=False,
+    help="Publica o dataset de avaliação no Langfuse e roda experimentos lá.",
+)
+app.add_typer(dataset_app, name="dataset")
+
+RunNameOption = typer.Option(None, "--name", "-n", help="Nome da execução. O padrão é a data.")
+
+
+@dataset_app.command("push")
+def dataset_push(
+    dataset: Path = DatasetOption,
+    verbose: bool = VerboseOption,
+) -> None:
+    """Envia o dataset local para o Langfuse, criando ou atualizando os itens."""
+    setup_logging(verbose=verbose)
+    cases = load_dataset(dataset)
+
+    with console.status(f"[cyan]Enviando {len(cases)} caso(s)..."):
+        total = _with_langfuse(lambda: sync_dataset(cases))
+
+    console.print(f"[green]OK[/] {total} item(ns) em [bold]{DATASET_NAME}[/]")
+    console.print("[dim]O arquivo continua no git: dataset versionado com o código é o padrão.")
+
+
+@dataset_app.command("run")
+def dataset_run(
+    name: str | None = RunNameOption,
+    verbose: bool = VerboseOption,
+) -> None:
+    """Roda o dataset como experimento no Langfuse, com os traces e as notas lá."""
+    setup_logging(verbose=verbose)
+    _require_index()
+
+    settings = get_settings()
+    run_name = name or f"{settings.chat_model}-k{settings.retrieval_k}-{_today()}"
+    configuration = capture_configuration().to_dict()
+    configuration.pop("prompt")
+
+    with console.status(f"[cyan]Rodando o experimento {run_name}..."):
+        result = _with_langfuse(
+            lambda: run_experiment(
+                name=run_name,
+                description=f"chunking {settings.chunk_strategy.value}, k={settings.retrieval_k}",
+                metadata=configuration,
+            )
+        )
+
+    console.print(f"[green]OK[/] experimento [bold]{run_name}[/]")
+
+    url = getattr(result, "dataset_run_url", None)
+    if url:
+        console.print(f"[dim]{url}")
+    console.print("[dim]Compare execuções na aba Datasets do Langfuse.")
+
+
+def _today() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M")
+
+
+def _with_langfuse[T](action: Callable[[], T]) -> T:
+    """Run something that needs the platform, or exit saying it is missing."""
+    try:
+        return action()
+    except LangfuseUnavailableError as error:
+        console.print(f"[yellow]{error}")
+        raise typer.Exit(code=1) from error
 
 
 @app.command()

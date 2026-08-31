@@ -73,7 +73,7 @@ back out, and nothing else.
 | Retrieval | `indexing/` | Load, split, embed, search. |
 | Providers | `providers.py` | The only place OpenAI appears. |
 | Behaviour | `prompts/` | The rules, fetched from Langfuse or read from `templates.py`. |
-| Measurement | `evaluation/` | Grade the agent against known answers. |
+| Measurement | `evaluation/` | Grade the agent, locally or on the platform. |
 
 ---
 
@@ -1073,6 +1073,54 @@ grade.
 
 A judge model would be the right call for a larger dataset, or for grading
 prose where the wording legitimately varies. At this size it would buy noise.
+
+### On the platform
+
+The local suite writes one report per run into `evals/results/`. That works
+until the directory grows past what anyone opens, and the only comparison it
+offers is a command reading two files.
+
+Pushing the dataset to Langfuse turns each run into a tracked experiment:
+
+```bash
+rag dataset push                          # send the questions to Langfuse
+rag dataset run --name articles-k8        # run them there
+```
+
+Every case gets its own trace, the five metrics hang off it as scores, and two
+runs sit side by side in a UI built for that comparison. The run carries the
+configuration as metadata, so a score is never separated from the settings that
+produced it.
+
+```
+$ rag dataset run --name articles-k8
+OK experimento articles-k8
+https://us.cloud.langfuse.com/project/.../datasets/.../runs/8b5490cf
+```
+
+The dataset file stays in git. A dataset versioned alongside the code is what
+makes a score reproducible, and it is the standard: the questions change with
+the system, and a pull request that adds a case should show that case in the
+diff. What moves to the platform are the results.
+
+The case id becomes the item id, so `dataset push` updates items in place
+rather than duplicating them, the same way ingestion is idempotent.
+
+The metrics are the same functions the local suite uses, wrapped as Langfuse
+evaluators. Reusing them is what keeps the two paths from disagreeing, and
+they stay deterministic and free either way.
+
+A metric that does not apply records nothing rather than a zero. Zero would
+read as a failure, and the schema rejects null: an out-of-corpus question has
+no retrieval to grade, and saying so is different from failing it.
+
+### Human review
+
+With the dataset on the platform, the annotation queue works with no code at
+all. Send traces to a queue in the Langfuse UI, review the answers by hand, and
+the labels come back as scores next to the automatic ones. It is the one thing
+here no deterministic metric can do: judge whether an answer reads well and
+means what the document means.
 
 ### The dataset
 

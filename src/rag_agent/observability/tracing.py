@@ -58,6 +58,15 @@ RUN_NAME = "rag.ask"
 RECURSION_LIMIT = 10
 
 
+def client_or_none() -> Any | None:
+    """The Langfuse client, or None when tracing is not configured.
+
+    Exposed because datasets and experiments need the same connection that
+    carries the traces, rather than a second one.
+    """
+    return _client()
+
+
 def build_callbacks() -> list[Any]:
     """Callbacks to hand to the agent. Empty when tracing is off."""
     if _client() is None:
