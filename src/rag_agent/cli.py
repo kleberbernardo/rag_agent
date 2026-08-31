@@ -67,13 +67,20 @@ _EXIT_WORDS = frozenset({"sair", "exit", "quit"})
 
 # One description per metric, so the local table and the platform table say
 # the same thing about the same number.
+# Names follow the RAG evaluation literature, so a reader who knows RAGAS or
+# LangSmith recognises what each one measures. The second column says what the
+# name means in this project, since the same word is used loosely elsewhere.
+#
+# The first four compare the answer against the dataset's expected output.
+# The last two compare it against what the agent retrieved, which is why they
+# also work on production traffic, where no expected answer exists.
 _METRIC_LABELS = {
-    "retrieval": "trouxe o documento certo",
-    "citacao": "citou a fonte certa",
-    "fato": "o número ou termo esperado apareceu",
-    "recusa": "admitiu não saber, fora do corpus",
-    "fundamentacao": "todo número saiu do que ele leu",
-    "juiz": "fiel aos trechos e completa",
+    "retrieval": "the right document came back",
+    "citation": "the answer names the right source",
+    "correctness": "the expected number or term is present",
+    "refusal": "admitted not knowing, outside the corpus",
+    "groundedness": "every number came from what it read",
+    "faithfulness": "the sentence matches the passage (model-graded)",
 }
 
 VerboseOption = typer.Option(False, "--verbose", "-v", help="Mostra logs detalhados.")
@@ -89,9 +96,9 @@ MaxCostOption = typer.Option(
     help="Custo máximo em US$ para a execução inteira. 0 desliga a checagem.",
 )
 JudgeOption = typer.Option(
-    False,
-    "--judge",
-    help="Também pede a um modelo que julgue fidelidade e completude. Custa tokens.",
+    True,
+    "--judge/--no-judge",
+    help="A métrica faithfulness, julgada por um modelo. Ligada por padrão; custa tokens.",
 )
 MinScoreOption = typer.Option(
     1.0,
@@ -180,11 +187,6 @@ dataset_app = typer.Typer(
 )
 app.add_typer(dataset_app, name="dataset")
 
-LangfuseOption = typer.Option(
-    False,
-    "--langfuse",
-    help="Registra a execução no Langfuse em vez de gravar um relatório local.",
-)
 RunNameOption = typer.Option(
     None, "--name", help="Nome da execução no Langfuse. O padrão é modelo, k e data."
 )
@@ -340,11 +342,16 @@ def eval_command(
     min_score: float = MinScoreOption,
     max_cost: float = MaxCostOption,
     judge: bool = JudgeOption,
-    langfuse: bool = LangfuseOption,
     name: str | None = RunNameOption,
     verbose: bool = VerboseOption,
 ) -> None:
-    """Mede o agente contra perguntas cuja resposta é conhecida."""
+    """Mede o agente contra perguntas cuja resposta é conhecida.
+
+    Com o Langfuse configurado, as perguntas vêm do dataset publicado lá e as
+    notas voltam para ele. Sem, o arquivo local é lido e um relatório é
+    gravado. O agente e as métricas rodam nesta máquina nos dois casos: nenhuma
+    plataforma executa a sua aplicação.
+    """
     setup_logging(verbose=verbose)
     _require_index()
 
@@ -352,7 +359,11 @@ def eval_command(
     if limit > 0:
         cases = cases[:limit]
 
-    if langfuse:
+    # No flag chooses the destination. Configured Langfuse means the questions
+    # come from the dataset there and the scores go back to it; without it the
+    # file is read and a report is written. One command, one behaviour, and the
+    # decision belongs to the environment rather than to whoever types it.
+    if get_settings().tracing_enabled:
         _evaluate_on_langfuse(name=name, with_judge=judge, min_score=min_score)
         return
 
@@ -432,9 +443,9 @@ def _evaluate_on_langfuse(*, name: str | None, with_judge: bool, min_score: floa
 def _render_counts(counts: dict[str, tuple[int, int]], run_name: str) -> None:
     """The same table the local run prints, built from the platform's result."""
     table = Table(title=f"avaliação · {run_name}", border_style="cyan")
-    table.add_column("métrica")
-    table.add_column("resultado", justify="right")
-    table.add_column("o que mede", style="dim")
+    table.add_column("metric")
+    table.add_column("score", justify="right")
+    table.add_column("what it measures", style="dim")
 
     for metric, description in _METRIC_LABELS.items():
         if metric not in counts:
@@ -443,7 +454,7 @@ def _render_counts(counts: dict[str, tuple[int, int]], run_name: str) -> None:
         table.add_row(metric, f"{passed / total:.0%}" if total else "n/a", description)
 
     passed, total = _totals(counts)
-    table.add_row("geral", f"{passed / total:.0%}" if total else "n/a", "notas positivas no total")
+    table.add_row("overall", f"{passed / total:.0%}" if total else "n/a", "positive scores overall")
     console.print(table)
 
 
@@ -462,9 +473,9 @@ def _totals(counts: dict[str, tuple[int, int]]) -> tuple[int, int]:
 def _render_report(report: EvalReport) -> None:
     """Print the summary, then the failures, because failures are the point."""
     table = Table(title="avaliação", border_style="cyan")
-    table.add_column("métrica")
-    table.add_column("resultado", justify="right")
-    table.add_column("o que mede", style="dim")
+    table.add_column("metric")
+    table.add_column("score", justify="right")
+    table.add_column("what it measures", style="dim")
 
     table.add_row("retrieval", report.retrieval_accuracy.percent, "trouxe o documento certo")
     table.add_row("citação", report.citation_accuracy.percent, "citou a fonte certa")
@@ -493,16 +504,16 @@ def _render_report(report: EvalReport) -> None:
         console.print(f"  [dim]respondeu:[/] {escape(score.answer[:180])}")
         for label, value in (
             ("retrieval", score.retrieval_hit),
-            ("citação", score.citation_correct),
-            ("fato", score.facts_present),
-            ("recusa", score.refusal_correct),
-            ("fundamentação", score.grounded),
-            ("juiz", score.judged),
+            ("citation", score.citation_correct),
+            ("correctness", score.facts_present),
+            ("refusal", score.refusal_correct),
+            ("groundedness", score.grounded),
+            ("faithfulness", score.judged),
         ):
             if value is False:
-                console.print(f"  [red]falhou em {label}")
+                console.print(f"  [red]failed on {label}")
         if score.judge_reason and score.judged is False:
-            console.print(f"  [red]juiz:[/] {escape(score.judge_reason)}")
+            console.print(f"  [red]judge:[/] {escape(score.judge_reason)}")
         if score.ungrounded_numbers:
             console.print(
                 f"  [red]números sem apoio na fonte:[/] {', '.join(score.ungrounded_numbers)}"

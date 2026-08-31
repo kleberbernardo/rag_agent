@@ -240,42 +240,42 @@ Eight commands. Three of them are what you use daily.
 
 ### `rag eval` in full
 
-One command grades the agent. Where the result goes is a flag, not a second
-command:
+One command. Nothing to choose about where it runs:
 
 ```bash
-rag eval                        # summary in the terminal, report in evals/results/
-rag eval --langfuse             # same summary, recorded on the platform
+rag eval
+```
+
+| With Langfuse configured | Without |
+|---|---|
+| Questions come from the dataset there | Questions come from `evals/dataset.json` |
+| Scores go back, one per metric per question | A report is written to `evals/results/` |
+
+Either way the agent and the metrics run on this machine. No platform executes
+your application: Langfuse's own documentation is explicit that its evaluators
+"score the data already recorded on your traces" and "never re-execute your
+application". That division is the standard one, and it is what the RAGAS and
+Langfuse integration describes: the framework computes the metric, the platform
+stores the score next to the trace that produced the answer.
+
+What happens on one run:
+
+```
+1. read the 29 questions          Langfuse, or the file
+2. answer each one                this machine, always
+3. score six metrics              this machine, always
+4. send the scores                Langfuse, one per metric per question
+5. print the table                this terminal, always
 ```
 
 | Flag | Effect |
 |---|---|
-| `--langfuse` | Record the run in Langfuse instead of writing a local report |
-| `--judge` | Add the model that reads the sentence. Costs tokens. |
-| `--limit N` | Only the first N cases |
+| `--no-judge` | Skip `faithfulness`, the only metric that costs tokens to compute |
+| `--limit N` | Only the first N questions |
 | `--min-score 0.9` | Exit non-zero below this |
 | `--max-cost 0.05` | Exit non-zero above this |
-| `--compare <report>` | Diff against a previous local report |
 | `--name` | Name the run on the platform |
-
-Both paths print the same table, because having to open a browser to learn
-whether the suite passed is a worse trade than the history is worth:
-
-```
-                    avaliação · unificado-teste
-┌───────────────┬───────────┬─────────────────────────────────────┐
-│ métrica       │ resultado │ o que mede                          │
-├───────────────┼───────────┼─────────────────────────────────────┤
-│ retrieval     │      100% │ trouxe o documento certo            │
-│ citacao       │      100% │ citou a fonte certa                 │
-│ fato          │       96% │ o número ou termo esperado apareceu │
-│ recusa        │       75% │ admitiu não saber, fora do corpus   │
-│ fundamentacao │      100% │ todo número saiu do que ele leu     │
-│ juiz          │       89% │ fiel aos trechos e completa         │
-│ geral         │       96% │ notas positivas no total            │
-└───────────────┴───────────┴─────────────────────────────────────┘
-https://us.cloud.langfuse.com/.../runs/2bf9bb79
-```
+| `--compare <report>` | Diff against a previous local report |
 
 ### Reading it in Langfuse
 
@@ -1125,12 +1125,12 @@ established name in the RAG evaluation literature.
 
 | This project | Standard name | Where it is found |
 |---|---|---|
-| retrieval | context recall | RAGAS |
-| fato | answer correctness | RAGAS, DeepEval |
-| fundamentação | faithfulness, groundedness | RAGAS, TruLens |
-| juiz | LLM-as-a-judge, answer relevancy | RAGAS, LangSmith, DeepEval |
-| citação | attribution | LangSmith |
-| recusa | hallucination rate on unanswerable questions | RAGAS |
+| `retrieval` | context recall | RAGAS |
+| `correctness` | answer correctness | RAGAS, DeepEval |
+| `groundedness` | faithfulness, computed | RAGAS, TruLens |
+| `faithfulness` | LLM-as-a-judge faithfulness | RAGAS, LangSmith, DeepEval |
+| `citation` | attribution | LangSmith |
+| `refusal` | hallucination rate on unanswerable questions | RAGAS |
 
 RAGAS, LangSmith Evaluation, DeepEval and Langfuse Datasets all cover this
 ground, and none of them is used here. They share one default: a language
@@ -1150,49 +1150,34 @@ legitimately varies and a string match cannot tell a faithful sentence from a
 distorted one. That is exactly what `--judge` adds, kept separate and opt-in
 so the reproducible scores stay reproducible.
 
-### The judge
+### The six metrics
 
-The five metrics above check numbers and file names. They pass an answer that
-states the right figure while inverting the condition around it: the regulation
-says a fact **may** be withheld, the answer says it **must** be, and no number
-moved.
-
-Catching that needs something that reads:
-
-```bash
-rag eval --judge                    # locally
-rag eval --langfuse --judge         # on the platform
-```
-
-A second model receives the question, the passages the agent actually read, and
-the answer, and grades two things only:
-
-| | |
-|---|---|
-| **Faithful** | Does the answer say what the passages say? |
-| **Complete** | Does it answer the question that was asked? |
-
-It is told not to judge style, length or citation, because other checks already
-do. The verdict comes back as a structured object rather than prose, so the
-grade is never parsed out of a sentence.
-
-**What it found on the first run**, on two cases every deterministic metric had
-passed:
-
-| Case | Deterministic | Judge |
+| Metric | Needs the expected answer? | What it checks |
 |---|---|---|
-| `garantia-emprestimo` | passed | The answer gives 140% "do valor do financiamento" for a question about **lending shares**, conflating two rules from the same document. |
-| `alteracao-informacoes` | passed | The answer opens with "deve ser comunicada imediatamente" where the text says **15 days**. The number appears later, so the string match was satisfied. |
+| `retrieval` | yes | The right document came back from the search |
+| `citation` | yes | The answer names the right source |
+| `correctness` | yes | The expected number or term is present |
+| `refusal` | yes | Outside the corpus, it admitted not knowing |
+| `groundedness` | no | Every number stated appears in what it read |
+| `faithfulness` | no | The sentence matches the passage, graded by a model |
 
-**Its cost is what a judge always costs.** It spends tokens on every case and
-it drifts, so the same answer can be graded differently twice. That is why it
-is opt-in and why it never replaces the deterministic metrics: they say whether
-the number is right, this says whether the sentence around it holds.
+The split in the middle column is the one that matters, and it is why the
+metrics live in code rather than as evaluators on the platform.
 
-The rubric is a managed prompt like the others, so tightening it is a version
-in Langfuse rather than a commit. And a judge that fails leaves the other five
-scores standing: a grader that can end the run it is grading is worse than one
-metric fewer.
+The first four compare an answer against a **known right answer**. They only
+exist where there is a dataset. A real user's question has no expected output,
+so nothing can grade it that way.
+
+The last two compare the answer against **what the agent retrieved**. They need
+no expected answer, which is why they would also work on production traffic.
+The literature calls these reference-free, and they are what RAGAS built its
+reputation on.
+
+`faithfulness` is not a layer on top of the others. It is the sixth metric,
+and the only one computed by a model instead of by string comparison. It exists
+because the other five pass an answer that states the right figure while
+inverting the condition around it: the regulation says a fact **may** be
+withheld, the answer says it **must** be, and no number moved.
 
 ### On the platform
 
@@ -1204,7 +1189,7 @@ Pushing the dataset to Langfuse turns each run into a tracked experiment:
 
 ```bash
 rag dataset push          # send the questions to Langfuse
-rag eval --langfuse       # run them there
+rag eval                  # run them there
 ```
 
 Every case gets its own trace, the five metrics hang off it as scores, and two

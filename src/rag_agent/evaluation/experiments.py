@@ -189,30 +189,30 @@ def _retrieval(*, output: Any, expected_output: Any, **_: Any) -> list[dict[str,
     """Whether the search returned the document the answer lives in."""
     expected = (expected_output or {}).get("source")
     if not expected:
-        return _skip("retrieval", "fora do corpus")
+        return _skip("retrieval", "outside the corpus")
 
     hit = expected in (output or {}).get("sources", [])
-    return _score("retrieval", hit, f"esperado {expected}")
+    return _score("retrieval", hit, f"expected {expected}")
 
 
 def _citation(*, output: Any, expected_output: Any, **_: Any) -> list[dict[str, Any]]:
     """Whether the answer names the right source."""
     expected = (expected_output or {}).get("source")
     if not expected:
-        return _skip("citacao", "fora do corpus")
+        return _skip("citation", "outside the corpus")
 
-    return _score("citacao", expected in (output or {}).get("answer", ""), f"esperado {expected}")
+    return _score("citation", expected in (output or {}).get("answer", ""), f"expected {expected}")
 
 
 def _facts(*, output: Any, expected_output: Any, **_: Any) -> list[dict[str, Any]]:
     """Whether the expected number or term appears in the answer."""
     expected = (expected_output or {}).get("facts") or []
     if not expected:
-        return _skip("fato", "sem fato esperado")
+        return _skip("correctness", "no expected fact")
 
     answer = (output or {}).get("answer", "")
     missing = [fact for fact in expected if fact not in answer]
-    return _score("fato", not missing, f"faltou {missing}" if missing else "")
+    return _score("correctness", not missing, f"missing {missing}" if missing else "")
 
 
 def _refusal(*, output: Any, expected_output: Any, **_: Any) -> list[dict[str, Any]]:
@@ -222,18 +222,18 @@ def _refusal(*, output: Any, expected_output: Any, **_: Any) -> list[dict[str, A
     cannot exercise.
     """
     if (expected_output or {}).get("source"):
-        return _skip("recusa", "pergunta respondível")
+        return _skip("refusal", "answerable question")
 
-    return _score("recusa", bool((output or {}).get("refused")), "")
+    return _score("refusal", bool((output or {}).get("refused")), "")
 
 
 def _grounded(*, output: Any, **_: Any) -> list[dict[str, Any]]:
     """Whether every number stated came from what the agent read."""
     ratio = (output or {}).get("groundedness")
     if ratio is None:
-        return _skip("fundamentacao", "resposta sem número")
+        return _skip("groundedness", "no number stated")
 
-    return _score("fundamentacao", ratio == 1.0, f"{ratio:.0%} dos números com apoio")
+    return _score("groundedness", ratio == 1.0, f"{ratio:.0%} of the numbers supported")
 
 
 def _judged(*, input: Any, output: Any, **_: Any) -> list[dict[str, Any]]:
@@ -244,7 +244,7 @@ def _judged(*, input: Any, output: Any, **_: Any) -> list[dict[str, Any]]:
     """
     answer = (output or {}).get("answer")
     if not answer:
-        return _skip("juiz", "sem resposta")
+        return _skip("faithfulness", "no answer")
 
     verdict = judge_answer(
         question=(input or {}).get("question", ""),
@@ -252,9 +252,9 @@ def _judged(*, input: Any, output: Any, **_: Any) -> list[dict[str, Any]]:
         answer=answer,
     )
     if verdict is None:
-        return _skip("juiz", "o juiz falhou")
+        return _skip("faithfulness", "the judge failed")
 
-    return _score("juiz", verdict.passed, verdict.reason)
+    return _score("faithfulness", verdict.passed, verdict.reason)
 
 
 def _score(name: str, passed: bool, comment: str) -> list[dict[str, Any]]:

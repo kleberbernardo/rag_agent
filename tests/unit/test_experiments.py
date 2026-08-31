@@ -204,7 +204,7 @@ class TestEvaluators:
         )
 
         assert scored[0]["value"] == 0
-        assert "faltou" in scored[0]["comment"]
+        assert "missing" in scored[0]["comment"]
 
     def test_refusal_passes_when_the_agent_admits_ignorance(self) -> None:
         scored = experiments._refusal(
@@ -255,33 +255,33 @@ class TestSummarise:
 
     def test_it_counts_passes_per_metric(self) -> None:
         result = FakeExperimentResult(
-            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("fato", 1)),
-            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("fato", 0)),
+            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("correctness", 1)),
+            FakeItemResult(FakeEvaluation("retrieval", 1), FakeEvaluation("correctness", 0)),
         )
 
-        assert experiments.summarise(result) == {"retrieval": (2, 2), "fato": (1, 2)}
+        assert experiments.summarise(result) == {"retrieval": (2, 2), "correctness": (1, 2)}
 
     def test_a_metric_that_did_not_apply_is_counted_in_neither(self) -> None:
         """Skipped is not failed, the same as everywhere else."""
         result = FakeExperimentResult(
-            FakeItemResult(FakeEvaluation("recusa", 1)),
-            FakeItemResult(FakeEvaluation("recusa", None)),
+            FakeItemResult(FakeEvaluation("refusal", 1)),
+            FakeItemResult(FakeEvaluation("refusal", None)),
         )
 
-        assert experiments.summarise(result) == {"recusa": (1, 1)}
+        assert experiments.summarise(result) == {"refusal": (1, 1)}
 
     def test_it_reads_evaluations_given_as_dictionaries(self) -> None:
         """The SDK hands back either shape depending on the path taken."""
 
         class DictItem:
             def __init__(self) -> None:
-                self.evaluations = [{"name": "juiz", "value": 0}]
+                self.evaluations = [{"name": "faithfulness", "value": 0}]
 
         class DictResult:
             def __init__(self) -> None:
                 self.item_results = [DictItem()]
 
-        assert experiments.summarise(DictResult()) == {"juiz": (0, 1)}
+        assert experiments.summarise(DictResult()) == {"faithfulness": (0, 1)}
 
     def test_a_result_with_no_items_summarises_to_nothing(self) -> None:
         assert experiments.summarise(FakeExperimentResult()) == {}
