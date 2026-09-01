@@ -35,6 +35,10 @@ services:
     image: redis:7-alpine
     container_name: rag-redis
     command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Published for development: `rag serve` on the host shares the same
+      # session store and the same rate limit counters as the container.
+      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -92,6 +96,9 @@ services:
       # One process serialises requests; a slow question blocks the rest.
       API_WORKERS: ${API_WORKERS:-4}
       RATE_LIMIT: ${RATE_LIMIT:-60/minute}
+      # Shared across workers and replicas. Without it each process keeps
+      # its own counters and the ceiling is multiplied by their number.
+      RATE_LIMIT_STORAGE: redis://redis:6379/1
     volumes:
       # Read-only: the corpus is an input. Swapping documents needs no rebuild.
       - ./data:/app/data:ro

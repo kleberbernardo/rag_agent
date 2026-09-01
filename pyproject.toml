@@ -45,6 +45,7 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.28",
     "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
@@ -58,7 +59,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --strict-markers"
+# Four workers, not `auto`. Each worker loads the guardrail models into its
+# own process, so past four the memory pressure costs more than the
+# parallelism buys and workers start crashing. Measured on this suite:
+# 89s sequential, 89s at auto (eight workers, three crashes), 46s at four.
+addopts = "-q --strict-markers -n 4"
 markers = [
     "integration: exige rede ou chave de API real",
 ]

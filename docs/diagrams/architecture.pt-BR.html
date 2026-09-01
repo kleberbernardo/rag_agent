@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Arquitetura do RAG Agent</title>
+<style>
+  :root {
+    --bg:      #070d1a;
+    --rail:    #0d1a33;
+    --panel:   #101d36;
+    --box:     #16253f;
+    --line:    #24365a;
+
+    --ink:     #eaf0fb;
+    --ink-2:   #a6b6d4;
+    --ink-3:   #6d80a3;
+
+    --accent:  #ff6a1f;
+    --accent-2:#ff9557;
+    --accent-d:#3a1c0c;
+    --good:    #34d399;
+  }
+
+  /* Rendered at twice the layout size so the PNG has two device pixels per
+     CSS pixel. GitHub shows it at about 850 wide, and downscaling a 2x raster
+     is what keeps the type crisp. */
+  html { zoom: 2; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 14px/1.4 "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 38px;
+    width: 1900px;
+  }
+  code, .mono { font-family: "SF Mono", "Cascadia Mono", Consolas, monospace; }
+
+  /* ------------------------------------------------------------ header */
+  header { margin-bottom: 24px; display: flex; align-items: flex-end; gap: 20px; }
+  h1 { font-size: 29px; font-weight: 700; letter-spacing: -0.025em; }
+  .tagline { color: var(--ink-2); font-size: 14.5px; padding-bottom: 3px; }
+  .tagline b { color: var(--ink); font-weight: 600; }
+
+  /* ------------------------------------------------------------ layout */
+  .sheet { display: flex; gap: 16px; align-items: stretch; }
+  .lanes { flex: 1; display: flex; flex-direction: column; gap: 16px; }
+
+  .lane {
+    display: flex;
+    background: var(--rail);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .lane-name {
+    width: 54px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+  }
+  .lane-name span {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .lane-body {
+    flex: 1;
+    display: flex;
+    gap: 14px;
+    padding: 14px;
+    align-items: stretch;
+  }
+  .lane-body.stack { flex-direction: column; }
+
+  /* ------------------------------------------------------------- panel */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 13px 14px 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel > h3 {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+  .panel > h3 em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--ink-3);
+    font-size: 11.5px;
+    margin-left: 8px;
+  }
+
+  /* --------------------------------------------------------- flow row */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .flow > .box { flex: 1; }
+
+  .box {
+    background: var(--box);
+    border: 1px solid var(--accent);
+    border-radius: 9px;
+    padding: 9px 11px;
+    min-height: 62px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .box .t { font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+  .box .m { font-size: 10.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.35; }
+  .box .w { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; font-style: italic; line-height: 1.3; }
+
+  .box.dim   { border-color: var(--line); opacity: 0.6; }
+  .box.plain { border-color: var(--line); }
+  .box.good  { border-color: #2f7a5c; }
+
+  .arrow {
+    flex: none;
+    width: 26px;
+    align-self: center;
+    height: 2px;
+    background: var(--accent);
+    position: relative;
+    opacity: 0.85;
+  }
+  .arrow::after {
+    content: "";
+    position: absolute;
+    right: -1px; top: -4px;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 7px solid var(--accent);
+  }
+  .arrow.soft { background: var(--line); }
+  .arrow.soft::after { border-left-color: var(--line); }
+
+  .bar {
+    margin-top: 11px;
+    background: var(--box);
+    border: 1px solid var(--accent);
+    border-radius: 9px;
+    padding: 9px 12px;
+    text-align: center;
+  }
+  .bar .t { font-size: 12.5px; font-weight: 600; }
+  .bar .m { font-size: 10.5px; color: var(--ink-2); margin-top: 3px; }
+
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 7px;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+  .row:last-child { border-bottom: none; padding-bottom: 0; }
+  .row .k { font-size: 12px; font-weight: 600; min-width: 108px; }
+  .row .v { font-size: 11px; color: var(--ink-2); }
+  .row .v code { font-size: 10.5px; color: var(--ink-2); }
+
+  .tag {
+    display: inline-block;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 1px 5px; border-radius: 3px; margin-left: 5px;
+    vertical-align: 1px;
+  }
+  .tag-m { background: #10261f; color: var(--good); border: 1px solid #2f7a5c; }
+  .tag-o { background: #1a2438; color: var(--ink-3); border: 1px solid var(--line); }
+
+  /* -------------------------------------------------------- governance */
+  .gov {
+    width: 280px;
+    flex: none;
+    background: var(--accent-d);
+    border: 2px solid var(--accent);
+    border-radius: 14px;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .gov h2 {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #ffd9c2;
+    margin-bottom: 16px;
+  }
+  .gov-item { padding: 11px 0; border-bottom: 1px solid var(--accent); }
+  .gov-item:last-child { border-bottom: none; }
+  .gov-item .t { font-size: 12.5px; font-weight: 600; color: #ffe6d6; }
+  .gov-item .m { font-size: 10.5px; color: #f2b795; margin-top: 4px; line-height: 1.4; }
+  .gov-item .m code { font-size: 10px; }
+  .gov .grow { flex: 1; min-height: 8px; }
+
+  /* ------------------------------------------------------------ footer */
+  .strip {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .strip .label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-3); padding-right: 4px;
+  }
+  .chip {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip.good { border-color: #2f7a5c; background: #0d2119; }
+  .chip.good b { color: var(--good); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RAG Agent</h1>
+  <p class="tagline">
+    Recuperação agêntica sobre os seus próprios documentos ·
+    <b>busca híbrida</b> · <b>seis métricas medidas</b> · <b>guardrails nos dois lados</b>
+  </p>
+</header>
+
+<div class="sheet">
+
+  <div class="lanes">
+
+    <!-- =================================================== BUILD LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>Construção</span></div>
+      <div class="lane-body stack">
+
+        <div class="panel">
+          <h3>Ingestão e armazenamento <em>offline · rag ingest</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Carregar</div>
+              <div class="m mono">pypdf</div>
+              <div class="w">pdf, md, txt</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Quebrar<span class="tag tag-m">medido</span></div>
+              <div class="m mono">text-splitters</div>
+              <div class="w">por artigo, melhor que por caractere</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Varrer o corpus</div>
+              <div class="m mono">Arch-Guard</div>
+              <div class="w">injeção indireta</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Vetorizar</div>
+              <div class="m mono">text-embedding-3-small</div>
+              <div class="w">1536 dimensões</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Armazenar</div>
+              <div class="m mono">pgvector · Postgres 17</div>
+              <div class="w">uma transação</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Indexar</div>
+              <div class="m mono">HNSW · GIN</div>
+              <div class="w">vetor e texto</div>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="t">Idempotente por construção</div>
+            <div class="m mono">id = sha256(source + text) · reindexar sobrescreve · uma fila pode reentregar · rag sources --remove tira um documento</div>
+          </div>
+        </div>
+
+        <div class="lane-body" style="padding:0; gap:14px;">
+          <div class="panel" style="flex:1.45">
+            <h3>Recuperação <em>dois recuperadores, uma ordenação</em></h3>
+            <div class="flow">
+              <div class="box">
+                <div class="t">Busca vetorial</div>
+                <div class="m mono">pgvector, HNSW</div>
+                <div class="w">significado · acompanha paráfrase</div>
+              </div>
+              <div class="arrow"></div>
+              <div class="box">
+                <div class="t">Busca por palavra</div>
+                <div class="m mono">Postgres FTS, GIN</div>
+                <div class="w">identidade · acha códigos e referências exatas</div>
+              </div>
+              <div class="arrow"></div>
+              <div class="box">
+                <div class="t">Fusão RRF<span class="tag tag-m">medido</span></div>
+                <div class="m mono">Σ 1/(60 + rank)</div>
+                <div class="w">funde por posição, não por nota · trouxe o trecho que faltava para a janela</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box dim">
+                <div class="t">Reordenação<span class="tag tag-o">DESLIGADA</span></div>
+                <div class="m mono">bge-reranker-v2-m3</div>
+                <div class="w">corrige precisão; aqui faltava recall</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="flex:1">
+            <h3>Avaliação <em>rag eval · perguntas medidas, algumas sem resposta</em></h3>
+            <div class="flow">
+              <div class="box good">
+                <div class="t">Com referência</div>
+                <div class="m mono">retrieval · citation<br>correctness · refusal</div>
+                <div class="w">contra a resposta esperada</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box good">
+                <div class="t">Sem referência</div>
+                <div class="m mono">groundedness<br>faithfulness</div>
+                <div class="w">contra o que foi recuperado</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box good">
+                <div class="t">Portão</div>
+                <div class="m mono">--min-score<br>--max-cost</div>
+                <div class="w">o código de saída é o contrato</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================================================== SERVE LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>Operação</span></div>
+      <div class="lane-body">
+
+        <div class="panel" style="flex:1.45">
+          <h3>Respondendo uma pergunta <em>online · CLI e HTTP, uma camada de serviço</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Guardrails na entrada</div>
+              <div class="m mono">LLM Guard · presidio</div>
+              <div class="w">tamanho · CPF · CNPJ · chaves · injeção</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Agente</div>
+              <div class="m mono">create_agent · LangGraph</div>
+              <div class="w">modelo ⇄ ferramentas · buscas com teto por turno</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Recuperar</div>
+              <div class="m mono">híbrida, fundida</div>
+              <div class="w">o painel acima</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Responder</div>
+              <div class="m mono">gpt-4o-mini · t=0</div>
+              <div class="w">com fonte, ou uma recusa honesta</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Guardrails na saída</div>
+              <div class="m mono">citação · teto de tokens</div>
+              <div class="w">registra, nunca bloqueia</div>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="t">Uma camada de serviço, e ela não conhece nenhuma das duas</div>
+            <div class="m mono">agent/service.py conduz o turno · o CLI e a API traduzem entrada e saída · os guardrails rodam aqui, então uma terceira interface já nasce coberta</div>
+          </div>
+          <div class="bar" style="border-color: var(--line);">
+            <div class="t">Recusa não é falha</div>
+            <div class="m mono">CLI: uma linha amarela e código de saída 2 · HTTP: 400 com o motivo em campo próprio · 500 acordaria o plantão por um guardrail funcionando</div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Operação <em>FastAPI · Uvicorn · Redis</em></h3>
+          <div class="rows">
+            <div class="row">
+              <span class="k">Rastreamento</span>
+              <span class="v">Langfuse: cada turno, suas ferramentas, seus tokens e seu custo</span>
+            </div>
+            <div class="row">
+              <span class="k">Sondas</span>
+              <span class="v"><code>/health</code> vivacidade, não checa mais nada · <code>/ready</code> prontidão, checa o banco e o índice</span>
+            </div>
+            <div class="row">
+              <span class="k">Limite de taxa</span>
+              <span class="v">janela móvel por chamador, compartilhada no Redis para os workers terem um teto só</span>
+            </div>
+            <div class="row">
+              <span class="k">Concorrência</span>
+              <span class="v">workers do Uvicorn · sessões no Redis, só o histórico de mensagens</span>
+            </div>
+            <div class="row">
+              <span class="k">Falha</span>
+              <span class="v">toda mensagem nomeia o comando que resolve</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================================================= LLMOPS LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>LLMOps</span></div>
+      <div class="lane-body">
+
+        <div class="panel" style="flex:1">
+          <h3>Portões de qualidade <em>a cada push</em></h3>
+          <div class="flow">
+            <div class="box good">
+              <div class="t">Testes</div>
+              <div class="m mono">pytest · xdist</div>
+              <div class="w">unidade sem infraestrutura, integração atrás de uma marca</div>
+            </div>
+            <div class="arrow soft"></div>
+            <div class="box good">
+              <div class="t">Checagem estática</div>
+              <div class="m mono">ruff · mypy</div>
+              <div class="w">lint, formatação e tipos, tudo estrito</div>
+            </div>
+            <div class="arrow soft"></div>
+            <div class="box good">
+              <div class="t">Cobertura</div>
+              <div class="m mono">pytest-cov</div>
+              <div class="w">por módulo, não como um número só</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Entrega <em>o mesmo artefato em todo lugar</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">CI</div>
+              <div class="m mono">GitHub Actions</div>
+              <div class="w">Linux e Windows, para uma quebra de plataforma aparecer aqui</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Imagem</div>
+              <div class="m mono">Docker multi-stage</div>
+              <div class="w">sem root · torch só de CPU · serve e migra</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Migrar</div>
+              <div class="m mono">alembic upgrade head</div>
+              <div class="w">uma tacada antes da API, nunca no boot</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Avaliação contínua <em>sob demanda e semanal</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Execução agendada</div>
+              <div class="m mono">cron · segundas</div>
+              <div class="w">o corpus para de mudar; o modelo não</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Comparar</div>
+              <div class="m mono">rag eval --compare</div>
+              <div class="w">o que mudou, e qual configuração mudou junto</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Reprovar a build</div>
+              <div class="m mono">limiares de nota e custo</div>
+              <div class="w">uma regressão bloqueia; uma falha conhecida não</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ==================================================== GOVERNANCE -->
+  <aside class="gov">
+    <h2>Governança<br>de LLM</h2>
+
+    <div class="gov-item">
+      <div class="t">Gestão de prompts</div>
+      <div class="m">Quatro prompts no Langfuse sob o label <code>production</code>. Mover o label é um rollback sem deploy. Cai para <code>templates.py</code>.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Política de segurança</div>
+      <div class="m">Recusado antes de custar: injeção, CPF, CNPJ, chaves de API. Registrado depois de pago: resposta sem fonte.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Controle de esquema</div>
+      <div class="m">O esquema é do Alembic. A aplicação verifica e recusa, nomeando <code>alembic upgrade head</code>. Ela nunca migra sozinha.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Reprodutibilidade</div>
+      <div class="m">Cada execução grava modelo, chunking, <code>RETRIEVAL_K</code> e o hash do prompt. Uma nota sem isso não se compara a nada.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Controle de custo</div>
+      <div class="m">Estimativa por resposta, teto de tokens, orçamento de buscas por turno e <code>--max-cost</code> na suíte.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Auditoria</div>
+      <div class="m">Pergunta, trechos recuperados e resposta são um trace só. O log local rotativo guarda o que a plataforma não guarda.</div>
+    </div>
+
+    <div class="grow"></div>
+    <div class="gov-item" style="border-top:1px solid var(--accent); border-bottom:none;">
+      <div class="m">Ainda não coberto: recuperação com permissão, e varredura de dado pessoal na resposta.</div>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>

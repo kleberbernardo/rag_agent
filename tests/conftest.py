@@ -68,6 +68,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "SESSION_TTL_SECONDS",
         "API_KEY",
         "RATE_LIMIT",
+        "RATE_LIMIT_STORAGE",
         "API_WORKERS",
         "MAX_RETRIES",
         "REQUEST_TIMEOUT_SECONDS",

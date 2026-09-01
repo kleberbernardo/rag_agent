@@ -16,6 +16,24 @@ from rag_agent.api.app import create_app
 from rag_agent.config import get_settings
 from rag_agent.indexing import DatabaseUnavailableError
 
+REDIS_URI = "redis://localhost:6379/15"
+
+
+def redis_is_up() -> bool:
+    """Whether the shared store is reachable, so the test can skip rather than fail."""
+    from limits.storage import storage_from_string
+
+    try:
+        return bool(storage_from_string(REDIS_URI).check())
+    except Exception:
+        return False
+
+
+requires_redis = pytest.mark.skipif(
+    not redis_is_up(),
+    reason="needs a running Redis (docker compose up -d redis)",
+)
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
@@ -142,6 +160,76 @@ class TestRateLimit:
             codes = {client.post("/ask", json={"question": "x"}).status_code for _ in range(8)}
 
         assert codes == {200}
+
+
+class TestSharedCounters:
+    """Where the counters live decides whether the ceiling is one ceiling.
+
+    Four workers each keeping their own counters enforce 60/minute four times
+    over, so the real ceiling is 240. The tests below use the limiter directly
+    rather than through the app, because what is being checked is two
+    processes sharing state and a test client is one process.
+    """
+
+    def build(self, uri: str) -> tuple[object, object, object]:
+        from limits import parse
+        from limits.strategies import MovingWindowRateLimiter
+
+        from rag_agent.api.limits import _build_storage
+
+        return (
+            parse("3/minute"),
+            MovingWindowRateLimiter(_build_storage(uri)),
+            MovingWindowRateLimiter(_build_storage(uri)),
+        )
+
+    def test_in_process_counters_multiply_the_ceiling(self) -> None:
+        """The default, and the reason the setting exists."""
+        from uuid import uuid4
+
+        item, first, second = self.build("")
+        caller = uuid4().hex
+
+        allowed = [
+            (first if index % 2 == 0 else second).hit(item, caller)  # type: ignore[attr-defined]
+            for index in range(6)
+        ]
+
+        assert allowed == [True] * 6
+
+    @requires_redis
+    def test_shared_counters_keep_one_ceiling(self) -> None:
+        from uuid import uuid4
+
+        item, first, second = self.build(REDIS_URI)
+        caller = uuid4().hex
+
+        allowed = [
+            (first if index % 2 == 0 else second).hit(item, caller)  # type: ignore[attr-defined]
+            for index in range(6)
+        ]
+
+        assert allowed == [True, True, True, False, False, False]
+
+    def test_an_unreachable_store_falls_back_instead_of_failing(self) -> None:
+        """Accuracy is the right thing to lose, not availability.
+
+        Per-worker counting is a ceiling enforced too loosely. Refusing to
+        start is no ceiling at all, and no service either.
+        """
+        from limits.storage import MemoryStorage
+
+        from rag_agent.api.limits import _build_storage
+
+        assert isinstance(_build_storage("redis://127.0.0.1:1/0"), MemoryStorage)
+
+    def test_an_async_uri_is_refused_rather_than_used(self) -> None:
+        """This middleware is synchronous and cannot drive an async storage."""
+        from limits.storage import MemoryStorage
+
+        from rag_agent.api.limits import _build_storage
+
+        assert isinstance(_build_storage("async+memory://"), MemoryStorage)
 
 
 class TestCallerIdentity:

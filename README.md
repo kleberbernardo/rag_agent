@@ -29,43 +29,19 @@ says so instead of inventing one.
   in one container.
 
 ---
-
 ## Architecture
 
-Two phases that never run at the same time, and two interfaces over one
-service layer.
+![Architecture](docs/architecture.png)
 
-```
-INGESTION  ·  offline, `rag ingest`
+Two lanes and one column. **Build** is everything that happens before a
+question exists: ingestion, storage, retrieval and the graded suite. **Serve**
+is one question and what surrounds it. **Governance** is the part that has to
+hold whatever the other two do.
 
-   data/*.pdf ──► loader ──► splitter ──► embeddings ──► Postgres
-                  pdf, md    per article    OpenAI       pgvector
-                  txt, rst   Art. 1, 2…                  + full text
+The diagram is generated from [`docs/diagrams/architecture.html`](docs/diagrams/architecture.html),
+so it is edited as source rather than redrawn.
 
-
-QUERY  ·  online
-
-   CLI  rag ask ───┐
-                   ├──► service ──► agent ──┬──► search_documentation ──► Postgres
-   API  POST /ask ─┘                  ▲     │
-                                      │     └──► calculate
-                                      └─────────┘  the result comes back
-
-                   answer + source + latency · tokens · cost
-                                       │
-                            ┌──────────┴──────────┐
-                            ▼                     ▼
-                      Langfuse trace         rag eval · 29 cases · 97%
-```
-
-The loop separates this from a plain pipeline. A pipeline retrieves once and
-answers. Here the model may skip retrieval, retry with different terms, or
-chain a second tool, and it stops only when it writes prose instead of calling
-something.
-
-Both interfaces sit on `service`, so neither holds orchestration of its own.
-The CLI and the HTTP layer translate their input into a call and the result
-back out, and nothing else.
+### Where the code lives
 
 | Layer | Module | Responsibility |
 |---|---|---|
@@ -73,102 +49,50 @@ back out, and nothing else.
 | Orchestration | `agent/` | Build the graph, run a turn, measure it. |
 | Capabilities | `tools/` | What the model may call. |
 | Retrieval | `indexing/` | Load, split, embed, search by meaning and by word. |
+| Safety | `guardrails/` | What is refused on the way in, flagged on the way out. |
 | Providers | `providers.py` | The only place OpenAI appears. |
 | Behaviour | `prompts/` | The rules, fetched from Langfuse or read from `templates.py`. |
 | Measurement | `evaluation/` | Grade the agent, locally or on the platform. |
 
----
+Both interfaces sit on `agent/service.py`, so neither holds orchestration of
+its own and a third one is a wrapper rather than a rewrite. The guardrails run
+there too, which is what covers every interface by construction.
 
-## The agent loop
+### Techniques
 
-`create_agent` builds a LangGraph state graph and returns it compiled. The
-project never imports `langgraph` itself, and the graph is not hand-written:
-it has three nodes and one conditional edge.
+| Technique | Where | Why it is here |
+|---|---|---|
+| **Agentic RAG** | `agent/` | A pipeline retrieves once and answers. Here the model decides whether to retrieve, and can retry with different terms. |
+| **Hybrid search** | `indexing/` | An embedding follows a paraphrase; keyword search finds `Art. 70`. Measured on the same question: rank 31 by embedding, rank 5 by keyword. |
+| **Reciprocal Rank Fusion** | `hybrid.py` | Merges on rank, not score, because a cosine distance and a text search rank are not on the same scale. |
+| **Adaptive chunking** | `splitter.py` | By article, falling back to characters below three headings. Measured: 93% by characters, 97% by article. |
+| **Idempotent ingestion** | `vector_store.py` | The id is `sha256(source + text)`, so re-ingesting overwrites and a queue can redeliver safely. |
+| **Two-stage retrieval** | `search()` | Retrieval is judged on recall, reranking on precision. The pool widens only when something will narrow it. |
+| **LLM-as-a-judge** | `evaluation/judge.py` | Structured output against a rubric that is itself a managed prompt. |
+| **Indirect injection scanning** | `guardrails/injection.py` | A retrieved passage is read the way the system prompt is read. Scanned at ingestion, once per chunk. |
+| **Prompt management** | `prompts/` | Four prompts under a `production` label. Moving the label is a rollback with no deploy. |
+| **Fail fast with a remedy** | everywhere | Every error message names the command that fixes it. |
 
-```
-   __start__
-       │
-       ▼
-   ┌───────┐
-   │ model │ ◄─────────┐
-   └───┬───┘           │
-       │ conditional   │
-   ┌───┴────┐          │
-   ▼        ▼          │
- tools   __end__       │
-   │                   │
-   └───────────────────┘
-```
+### Stack
 
-The conditional edge carries the whole idea. After the model speaks, the graph
-asks whether it requested a tool:
-
-- **yes** → run `tools`, feed the output back into `model`
-- **no** → `__end__`, the answer is final
-
-That cycle lets the agent search, read what came back, and decide again. Without it the flow is linear: retrieve once, answer, stop.
-
-The loop is capped two ways, and both caps exist because of the same
-question: one the corpus cannot answer.
-
-`MAX_SEARCHES_PER_TURN` stops the searching. A vector search always returns its
-`k` nearest chunks, however far they sit, so it can never report finding
-nothing. The agent therefore sees results on every attempt and rewords the
-query indefinitely. Past the budget the tool answers with an instruction to
-conclude, and the agent says it did not find the subject, which is the truthful
-outcome.
-
-A distance threshold would be the obvious fix and does not work here. Measured
-on this corpus, the worst valid question scores 0.972 and the best invalid one
-0.840: the ranges overlap, so any cut rejects good questions or accepts bad
-ones.
-
-Ten steps on the graph is the second cap, and the safety net behind the first.
-
-## Technologies
-
-| Layer | Used |
-|---|---|
-| Orchestration | LangChain 1.x and LangGraph 1.x, through `create_agent` |
-| Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small`, reached through `langchain-openai` |
-| Vector store | Postgres 17 with pgvector, and its full text search |
-| Database access | `langchain-postgres`, SQLAlchemy 2, `psycopg` 3 |
-| Chunking | `langchain-text-splitters` |
-| Reranking | Optional cross-encoder, `BAAI/bge-reranker-v2-m3`, through `sentence-transformers` |
-| Guardrails | LLM Guard: prompt injection, secrets, anonymisation |
-| HTTP | FastAPI, Uvicorn |
-| Sessions | In process by default, Redis when shared across replicas |
-| CLI | Typer, Rich |
-| Configuration | Pydantic 2, Pydantic Settings, python-dotenv |
-| Documents | pypdf |
-| Observability | Langfuse, optional |
-| Quality | pytest, pytest-cov, httpx, ruff, mypy |
-| Infrastructure | Docker, Compose, GitHub Actions |
-
-Python 3.12 or newer. Every OpenAI import lives in `providers.py`, which is the
-only file a provider swap rewrites.
-
-## Concepts
-
-| Concept | Where it lives |
-|---|---|
-| Retrieval-augmented generation | The whole project |
-| Embeddings and semantic search | `indexing/vector_store.py` |
-| Chunking | Two strategies: by character, by article |
-| Chunk overlap | 200 characters, so an idea survives a boundary |
-| Tool calling | `tools/`, where the model picks what to run |
-| Agent loop | The conditional edge above |
-| Grounding and source citation | Every answer names its document |
-| Idempotent ingestion | A chunk's id is a hash of its content |
-| Evaluation | 29 cases, five deterministic metrics |
-| Groundedness | Every number has to come from what was read |
-| LLMOps | Latency, tokens, cost, tracing |
-| Sandboxing | The calculator validates by AST before evaluating |
-| Layered architecture | Interfaces on top of one service layer |
-| Configuration by environment | Every setting read from the environment |
+| Layer | Tool | Note |
+|---|---|---|
+| Orchestration | LangChain 1.3, LangGraph 1.2 | Through `create_agent`, never `langgraph` directly |
+| Model | OpenAI `gpt-4o-mini`, `text-embedding-3-small` | Swapping providers rewrites `providers.py` and nothing else |
+| Vector and text | Postgres 17, pgvector, native FTS | One database, one transaction |
+| Reranking | `sentence-transformers`, `BAAI/bge-reranker-v2-m3` | Built, measured, off by default |
+| Guardrails | LLM Guard, presidio, `katanemolabs/Arch-Guard` | The injection model was chosen by measurement |
+| Observability | Langfuse 4.15 | Traces, scores, datasets, prompt management |
+| HTTP | FastAPI, Uvicorn | Workers configurable; `/health` and `/ready` separated |
+| Rate limiting | `limits` | Moving window, shared through Redis |
+| Migrations | Alembic | The application checks, never applies |
+| Sessions | Redis, or in process | Only the message history travels |
+| CLI | Typer, Rich | Tested with `CliRunner`, no subprocess |
+| Configuration | Pydantic Settings | Every tunable value, validated at boot |
+| Quality | pytest, pytest-xdist, ruff, mypy | 421 tests, 88% coverage, 46 seconds |
+| CI | GitHub Actions | Linux and Windows, plus a weekly evaluation run |
 
 ---
-
 ## Installation
 
 Requires Python 3.12+ and an OpenAI API key.
@@ -211,7 +135,6 @@ OPENAI_API_KEY=sk-...
 ```
 
 ---
-
 ## Running the commands
 
 > **The `rag` command only exists while the virtual environment is active.**
@@ -245,7 +168,6 @@ Never installed the package at all? `python main.py chat` works from the
 project root without the `rag` command.
 
 ---
-
 ## Commands
 
 Nine commands. Three of them are what you use daily.
@@ -321,7 +243,6 @@ testable and readable in the repository, and it runs offline. The two are
 different features that share a word.
 
 ---
-
 ## Usage
 
 All commands below assume the environment is active.
@@ -447,7 +368,6 @@ Shows the active configuration and how many chunks are indexed. Run this first
 whenever something looks wrong.
 
 ---
-
 ## Configuration
 
 Everything lives in `.env`. Copy `.env.example` and edit. Values are validated
@@ -469,6 +389,7 @@ message rather than failing mid-query.
 | `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | The cross-encoder to load. Multilingual, open source, runs locally. |
 | `RERANK_CANDIDATES` | `24` | How many candidates the reranker reads. Every one is a model pass, so this is the latency knob. |
 | `RATE_LIMIT` | `60/minute` | Ceiling per caller. Empty disables it. |
+| `RATE_LIMIT_STORAGE` | none | Where the counters live. Empty is per process; a `redis://` URL is shared. |
 | `API_WORKERS` | `1` | Uvicorn processes. One serialises every request. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
@@ -493,7 +414,6 @@ message rather than failing mid-query.
 | `REQUEST_TIMEOUT_SECONDS` | `60` | Ceiling on one provider call. |
 
 ---
-
 ## How it works
 
 The system has two phases that never run at the same time.
@@ -647,51 +567,253 @@ that file is how you change how the agent behaves.
 
 ---
 
-## Project structure
+### The agent loop
+
+`create_agent` builds a LangGraph state graph and returns it compiled. The
+project never imports `langgraph` itself, and the graph is not hand-written:
+it has three nodes and one conditional edge.
 
 ```
-src/rag_agent/
-├── config.py          settings, read from the environment and validated at boot
-├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
-├── providers.py       LLM and embedding clients, the only place OpenAI appears
-├── cli.py             presentation only, no domain logic
-│
-├── prompts/           the instructions, and where they are read from
-│   ├── __init__.py        fetch from Langfuse, render, fall back to the text
-│   └── templates.py       the text itself, and nothing else
-│
-├── observability/     what the run did, what it cost, and writing it down
-│   ├── tracing.py         Langfuse: traces, scores, prompt registry
-│   ├── pricing.py         token prices, dated
-│   └── logging_setup.py   console and file
-│
-├── indexing/          loader · splitter · vector_store · hybrid
-├── tools/             one module per tool, registered in build_tools()
-├── agent/             service (build + orchestration) · trace
-├── api/               routes · schemas · sessions · security · feedback
-└── evaluation/        dataset · metrics · runner · comparison · configuration
+   __start__
+       │
+       ▼
+   ┌───────┐
+   │ model │ ◄─────────┐
+   └───┬───┘           │
+       │ conditional   │
+   ┌───┴────┐          │
+   ▼        ▼          │
+ tools   __end__       │
+   │                   │
+   └───────────────────┘
 ```
 
-Four loose modules and seven packages. The four are the ones every layer
-reaches for and none of them owns: settings, domain types, the provider
-boundary, and the terminal.
+The conditional edge carries the whole idea. After the model speaks, the graph
+asks whether it requested a tool:
 
-Only three directories, and each earns it: `indexing/` grows with every new
-file format, `tools/` with every new tool, `agent/` holds the orchestration.
-Everything else is a single module.
+- **yes** → run `tools`, feed the output back into `model`
+- **no** → `__end__`, the answer is final
 
-| To change... | Edit |
+That cycle lets the agent search, read what came back, and decide again. Without it the flow is linear: retrieve once, answer, stop.
+
+The loop is capped two ways, and both caps exist because of the same
+question: one the corpus cannot answer.
+
+`MAX_SEARCHES_PER_TURN` stops the searching. A vector search always returns its
+`k` nearest chunks, however far they sit, so it can never report finding
+nothing. The agent therefore sees results on every attempt and rewords the
+query indefinitely. Past the budget the tool answers with an instruction to
+conclude, and the agent says it did not find the subject, which is the truthful
+outcome.
+
+A distance threshold would be the obvious fix and does not work here. Measured
+on this corpus, the worst valid question scores 0.972 and the best invalid one
+0.840: the ranges overlap, so any cut rejects good questions or accepts bad
+ones.
+
+Ten steps on the graph is the second cap, and the safety net behind the first.
+
+### Hybrid search
+
+Two retrievers run and their rankings are fused.
+
+An embedding compares meaning, which is what lets a question find a passage
+that shares none of its words. It also spreads a long article's signal across
+everything the article discusses, so one sentence stating a deadline ranks
+below whatever the article is mostly about.
+
+Postgres full text search compares words. It cannot follow a paraphrase, and
+it does not need to
+when the question names the terms the text uses.
+
+Measured on this corpus, on the question the suite failed for weeks: the
+passage stating the suspension deadline sits at **rank 31 by embedding** and at
+**rank 5 by keyword**.
+
+The two lists are merged by reciprocal rank fusion. Each document scores the
+sum of `1 / (60 + rank)` over the lists it appears in, so a passage both
+retrievers rank well beats one a single retriever loves. Fusing on rank rather
+than on score is what makes it work at all: a cosine distance and a text search rank
+are not on the same scale and cannot be added.
+
+Each retriever is asked for five times the passages wanted, and the fused list
+is cut back. Fusing two short lists only rewards what both retrievers already
+agreed on, which is what either would have found alone; the passages worth
+adding sit deeper in one list. Measured here, the missing deadline reaches the
+top eight at a multiplier of five and not at three.
+
+`SEARCH_STRATEGY=vector` turns the keyword half off. The keyword index is built
+once from what is stored and dropped whenever the store changes, since it is a
+copy.
+
+**What it fixed:** the last failing case, and with it `correctness` and
+`faithfulness`. Every metric now reads 100% on 29 questions.
+
+**What that number is worth:** the five deterministic metrics are reproducible,
+so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
+and drifts; one run at 100% is not a guarantee of the next.
+
+### Reranking
+
+Off by default. This section is as much about why as about how.
+
+**What a reranker is.** A second pass that reorders the passages the search
+already retrieved. It finds nothing of its own.
+
+```
+retrieval  ──▶  24 candidates  ──▶  reranker  ──▶  8 passages  ──▶  agent
+   wide, cheap                       narrow, expensive
+```
+
+**Why it is more accurate.** Every retriever above compares two things through
+something precomputed. A passage is embedded at ingestion, months before the
+question exists, so its vector compresses the text without knowing what will
+be asked of it. A cross-encoder reads the question and the passage together,
+in one forward pass, and answers directly: does this passage answer that one.
+
+That is also why it is expensive. Nothing can be precomputed, so the cost is
+one model pass per candidate, on every question.
+
+| | Embedding | Cross-encoder |
+|---|---|---|
+| Reads the pair together | No | Yes |
+| Computed when | At ingestion | At query time |
+| Cost | A lookup | A forward pass per candidate |
+| Scales to | Millions of passages | Dozens |
+
+**Why it is off here.** A reranker fixes precision. It cannot repair a pool
+the answer is not in. The failure this suite had for weeks was recall:
+measured on this corpus, the passage stating the suspension deadline sat at
+rank 31 of 590 by embedding. With `RETRIEVAL_K=8` a reranker would have been
+handed eight passages that did not contain the answer, and would have returned
+eight passages that still did not. Hybrid search is what fixed it.
+
+Turning it on would add latency and a two gigabyte dependency for a measured
+gain of nothing, on a corpus where every metric already reads 100%.
+
+**What it looks like when it works.** Measured with the default model on five
+real passages from this corpus, with the answer deliberately placed last, as
+it would arrive from a wide pool:
+
+| After reranking | Was | Score | Passage |
+|---|---|---|---|
+| 1 | 5 | `+0.9723` | `§ 2º O prazo de suspensão da oferta não pode ser superior a 30 dias.` |
+| 2 | 2 | `+0.2308` | `Art. 70. A SRE pode suspender ou cancelar, a qualquer tempo…` |
+| 3 | 1 | `+0.0050` | `Art. 12. O lote suplementar não pode ultrapassar 15%…` |
+| 4 | 3 | `+0.0004` | `Art. 25. O prospecto deverá ser elaborado…` |
+| 5 | 4 | `+0.0001` | `Art. 3. Consideram-se atos de distribuição pública…` |
+
+The gap between the first two is the useful part. The passage that merely
+mentions suspension scores 0.23; the one that states the deadline scores 0.97.
+An embedding cannot separate those, because both are about suspending an
+offer.
+
+**When to turn it on.** When the pool is wide enough that the answer is in it
+but not near the top. That is the normal condition at scale, and it is why the
+two-stage shape exists at all: with millions of passages you must retrieve
+a hundred or more to be confident of recall, and a hundred passages do not fit
+in a prompt. The reranker is the funnel between those two facts.
+
+```bash
+RERANK_STRATEGY=cross_encoder rag ask "qual o prazo de suspensão?"
+```
+
+The package is already installed: guardrails need torch, so the reranker costs
+almost nothing on top of it. The weights are a 2.2 GB download on first use.
+
+The pool widens on its own when it is enabled: `RERANK_CANDIDATES` replaces
+`RETRIEVAL_K` as the retrieval width, because a reranker handed exactly what
+it returns has nothing to choose between.
+
+**On the dependency.** A local cross-encoder means torch. That used to be
+the argument for keeping it optional, and it stopped being one when the
+guardrails made torch a hard dependency anyway. At scale the answer is neither
+in-process nor optional, it is a reranking service of its own, so the model is
+loaded once behind an endpoint instead of once per API replica. The interface
+here is one method, so that is a class, not a rewrite.
+
+**On sending text to an API.** Cohere Rerank is the commercial standard and is
+very good. It also means the corpus leaves the network. For a regulated
+institution that is usually the end of the discussion, which is why the local
+model is the default choice here.
+
+---
+
+## Guardrails
+
+Three layers on the way in, one on the way out. They run from
+`agent/service.py`, so the CLI and the API are covered by construction and a
+new interface cannot forget.
+
+| Layer | Checks | On failure |
+|---|---|---|
+| Arithmetic | Empty, and length against `MAX_QUESTION_CHARS` | Refuses |
+| Scanning | Secrets, e-mail, credit card, and **CPF, CNPJ, API keys** | Refuses |
+| Injection | Whether the question is an instruction | Refuses |
+| Output | Citation present, token ceiling | **Records a finding** |
+
+**A question is refused before it costs anything. An answer has already been
+paid for by the time it can be judged**, so what happens to it is a finding
+attached to the result, never an exception. Citation in particular is a
+finding and not a refusal: a correct refusal cites nothing, and this corpus
+has four questions it cannot answer on purpose.
+
+### LLM Guard, configured rather than used as shipped
+
+LLM Guard is the standard and it is built for English. Its own
+`ALL_SUPPORTED_LANGUAGES` is `["en", "zh"]` and its default entity list is
+`US_SSN` and `US_BANK_NUMBER`. Measured here, before any configuration:
+
+| Question | Verdict |
 |---|---|
-| The knowledge base | `data/`, then `rag ingest` |
-| How the agent behaves | Langfuse, or `prompts/templates.py` as the fallback |
-| Add a tool | `tools/` |
-| Chunking or retrieval | `.env` |
-| The model provider | `providers.py` |
-| Token prices | `observability/pricing.py` |
-| Add an endpoint | `api/routes.py` |
+| "qual o prazo máximo de suspensão?" | **refused**, confidence 1.00 |
+| "what is the maximum suspension period?" | passed |
+| "o que diz o Art. 70 da Resolução 160?" | **refused**, read 160 as an account number |
+| a CPF | **passed** |
 
-Interfaces stay thin because orchestration lives in `agent/service.py`. Adding
-an HTTP API or a bot means wrapping that service, not rewriting it.
+It refused every real question and missed the one identifier that matters in
+Brazil. What fixed it: dropping its English-only injection scanner, narrowing
+`entity_types` to the language-neutral patterns, and adding CPF, CNPJ and API
+keys by regex.
+
+### The injection classifier was chosen by measurement
+
+Eight cases, four of them attacks, half in Portuguese:
+
+| Model | Correct | False positives |
+|---|---|---|
+| **`katanemolabs/Arch-Guard`** | **7/8** | **0** |
+| `testsavantai/prompt-injection-defender-large-v0` | 6/8 | 0 |
+| `jackhhao/jailbreak-classifier` | 5/8 | 0 |
+| `protectai/deberta-v3-base-prompt-injection-v2` | 5/8 | **3** |
+
+The last row is LLM Guard's default. Meta's Prompt Guard 2 is the model the
+market reaches for first and is multilingual by design; it is also a gated
+repository, so it needs a licence and a token. `INJECTION_MODEL` switches to
+it in one setting.
+
+### Indirect injection is the risk that belongs to RAG
+
+A retrieved passage is pasted into the context and the model reads it the way
+it reads the system prompt. A retriever works in embedding space and has no
+notion of "this is data" rather than "this is an instruction", so a document
+carrying a hidden instruction attacks **every question that retrieves it**.
+
+The corpus is therefore scanned **at ingestion**, once per chunk, never per
+question: the documents change only when someone indexes them, so the answer
+cannot change between two questions. Measured on five chunks with one
+poisoned: one flagged, four genuine articles clean.
+
+A flagged chunk warns rather than refuses. This corpus is regulation, and
+regulation tells the reader what to do, so a classifier trained on jailbreaks
+will sometimes read a genuine article as an instruction. Refusing to index
+would silently drop the law.
+
+### What is not covered
+
+- **Permission-aware retrieval.** Anyone who can ask can retrieve any chunk.
+- **Output PII.** Only the question is scanned.
+- **Rate limiting.** No per-caller cost ceiling yet.
 
 ---
 
@@ -826,123 +948,93 @@ more tightly to LangChain. Use one or the other: sending the same run to two
 platforms means two places to look at the same data.
 
 ---
+## Running it for real
 
-## Prompt management
+Everything that decides whether answers keep happening, rather than what
+an answer says.
 
-The prompt decides how the agent behaves, and it changes far more often than
-the code around it. Kept as a string in the source, every wording change costs
-a commit, a build and a deploy, and no record survives of which text produced
-which score.
+### Probes, limits and workers
 
-Published to Langfuse, it becomes a versioned asset:
+| Endpoint | Answers | Checks |
+|---|---|---|
+| `GET /health` | liveness | nothing else |
+| `GET /ready` | readiness | database reachable, index populated |
 
-```bash
-rag prompt push -m "regra nova sobre citação"   # publish under the label
-rag prompt show                                 # what is in force, and where from
-```
+**They were one endpoint once, and it checked the database.** That is
+readiness wearing a liveness name: an orchestrator restarts a process whose
+liveness probe fails, so a database blinking would have restarted every
+replica at once, and that is how one database problem becomes an outage. A
+failed readiness probe takes the instance out of rotation and leaves it
+running, which is the right answer to a dependency that is briefly away.
 
-```
-$ rag prompt show
-origem       Langfuse v1
-label        production
-domínio      regulacao do mercado de capitais brasileiro (resolucoes da CVM)
-╭─ system ────────────────────────────────────────────────────╮
-│ Você é um assistente especializado em regulacao do mercado  │
-│ de capitais brasileiro (resolucoes da CVM).                 │
-...
-```
+The container healthcheck points at `/ready`, because Compose's
+`service_healthy` means "ready for traffic".
 
-Editing the text in the Langfuse UI and moving the `production` label is how a
-new version reaches the agent. Rolling back is moving the label to the previous
-one. Neither touches the repository.
+**Rate limiting** is a moving window per caller: `60/minute` by default, empty
+to disable. A caller is its API key when there is one and its address when
+there is not, and the key is hashed before it becomes a storage key. Every
+answer carries `X-RateLimit-Remaining`, so a client slows down before being
+refused rather than after. The probes are never limited: a balancer polling
+readiness every two seconds would exhaust a per-minute budget on its own.
 
-### What is published, and what is not
+> **Not slowapi.** It is the usual answer for FastAPI and it does not work
+> here. Both of its middlewares find the route by walking `app.routes` for
+> something with an `.endpoint`, and current FastAPI wraps everything from
+> `include_router` in an `_IncludedRouter` that has none. Every request looks
+> like a route it cannot identify, which it treats as exempt. The failure is
+> silent: the limiter reports itself enabled and the ceiling never fires. What
+> is used instead is `limits`, the library slowapi is built on.
 
-Three prompts go to Langfuse:
+**Where the counters live** decides whether the ceiling is one ceiling.
+`RATE_LIMIT_STORAGE` is empty by default, which keeps them in the process, and
+that is wrong the moment there is more than one: four workers each counting
+their own requests enforce 60/minute four times over. Measured, three per
+minute across two processes:
 
-| Prompt | What the model does with it |
+| Storage | Six requests |
 |---|---|
-| `rag-agent-system` | The rules it answers under |
-| `rag-agent-search-tool` | Decides whether a question needs retrieval |
-| `rag-agent-calculator-tool` | Decides whether a question needs arithmetic |
+| in-process | `ok ok ok ok ok ok` |
+| `redis://redis:6379/1` | `ok ok ok 429 429 429` |
 
-The line is what the text is for. A **description the model reads to decide**
-is tuned the way a prompt is tuned, so it belongs where prompts are versioned.
-The tool descriptions are exactly that: the model never sees a tool's body,
-only its name and its description, and rewording one changes when it gets
-called.
+An unreachable store falls back to the process and says so in the log.
+Accuracy is the right thing to lose there; refusing to start is no ceiling and
+no service either.
 
-What stays in the code is the text a tool **returns**: `"Divisão por zero."`,
-`"Nenhum trecho relevante encontrado na documentação."`. Those report what
-happened during a run. They are facts about execution rather than instructions,
-and nobody A/B tests them.
+**Workers**: `rag serve --workers 4`, or `API_WORKERS`. One process serialises
+requests, so a question that takes eight seconds blocks every other question
+for those eight seconds. `--reload` needs a single process and wins over
+`--workers`, which the command says rather than silently ignoring one.
 
-`_NO_RESULTS` sits closest to the line, since it is what prompts the agent to
-say it found nothing. It stays in code because it states a fact; the
-instruction to admit ignorance lives in the system prompt, where it can be
-tuned.
+### Schema migrations
 
-Both tools are therefore built by a factory rather than the `@tool` decorator:
-a decorator freezes the docstring at import, and a description fetched at call
-time is the whole point.
-
-### It never blocks an answer
-
-Without Langfuse configured, the templates in `prompts.py` are used and
-everything works. With Langfuse configured but unreachable, the same templates
-are used and a warning is logged. A prompt store that can stop the agent from
-answering is worse than no prompt store.
-
-The SDK caches for `PROMPT_CACHE_SECONDS`, so a request does not pay a round
-trip to fetch text that rarely changes.
-
-### One placeholder syntax
-
-Templates use `{{domain}}`, the form Langfuse compiles, on both paths. The
-local text is therefore published verbatim, and the same string renders whether
-it came from the platform or from the file.
-
-### Recorded with the score
-
-Every evaluation report carries `prompt_source` and `prompt_version` alongside
-the model and the chunking. A run graded against version 3 cannot be compared
-to one graded against version 4, and now the report says which was in force.
-
----
-
-## Feedback
-
-The evaluation dataset is written by whoever built the system, which means it
-tests the questions that person thought of. Feedback from real use is the only
-source of the ones they did not.
-
-Every answer carries a `run_id`. Send it back with a verdict:
+Alembic owns the extensions and the `portuguese_unaccent` text search
+configuration. The tables belong to langchain-postgres, which creates them on
+first write, and the two search indexes are built after that because they
+cannot exist before the table does.
 
 ```bash
-curl -X POST localhost:8080/feedback -H "Content-Type: application/json"   -d '{"run_id": "9b8c3a27...", "useful": false, "comment": "citou o artigo errado"}'
+alembic upgrade head      # prepare a database
+alembic revision -m "..."  # start a change
+alembic downgrade -1       # undo the last one
 ```
 
-The verdict is recorded in Langfuse as a score on the trace that produced the
-answer, which is where the platform already holds the prompt, the retrieved
-passages and the cost of that same run. Send the `trace_id` alongside the
-`run_id` to attach it.
+The URL is not in `alembic.ini`. `migrations/env.py` reads `DATABASE_URL`
+through the same settings object the application uses, so there is one place
+that knows where the database is and no credential in a tracked file.
 
-A local copy is appended to `logs/feedback.jsonl` as well, so the loop still
-closes with tracing switched off:
+**The application does not apply migrations.** It used to, and that is an
+anti-pattern past one replica: several processes starting together race to
+create the same objects, and a long migration blocks every boot rather than
+one deployment step. What the application does now is check, and fail naming
+the command:
 
-```json
-{"recorded_at": "2026-08-31T15:31:04+00:00", "run_id": "9b8c3a27...",
- "useful": false, "comment": "citou o artigo errado", "sent_to_langfuse": true}
+```
+O banco em postgresql+psycopg://rag:***@localhost:5432/rag não tem as
+migrações aplicadas. Rode: alembic upgrade head
 ```
 
-**What it is for.** The rejected answers are the candidates for new evaluation
-cases. A question the agent got wrong in real use belongs in `dataset.json`,
-and from then on it cannot regress unnoticed. That loop is what keeps the
-suite from testing only what was imagined on the first day.
-
-Nothing validates that a `run_id` belongs to a real answer. Rejecting unknown
-ids would mean holding every answer in memory, and an occasional stray entry
-costs less than that.
+In Compose a one-shot `migrate` service runs first and the API waits on
+`service_completed_successfully`.
 
 ---
 
@@ -995,51 +1087,6 @@ bindings (57 MB), all of it machinery for running Chroma as a server, which
 this container never did. A Postgres client is a driver.
 
 ---
-
-## Observability
-
-Every answer already reports its own cost locally. That tells you the total;
-it does not tell you where the time and the tokens went. For that, the agent
-can emit a full trace to [Langfuse](https://langfuse.com), with one row per
-model call, tool call and retrieval, each carrying its own latency, tokens and
-price.
-
-```
-rag.ask                                    3.78s   1634 tok   $0.00031
-├─ ChatOpenAI                              1.71s    411 tok
-│    └─ decided: search_documentation
-├─ tool: search_documentation              0.54s
-└─ ChatOpenAI                              1.52s   1223 tok
-     └─ final answer
-```
-
-Turn it on by setting both keys. A free account at
-[cloud.langfuse.com](https://cloud.langfuse.com) is enough:
-
-```
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_HOST=https://cloud.langfuse.com     # or https://us.cloud.langfuse.com
-```
-
-Leave them out and nothing is sent, nothing is imported, and the agent behaves
-identically. Observability must never break the thing it observes, so a rejected key or an
-unreachable Langfuse logs a warning and disables itself instead of failing the
-answer.
-
-Each `rag chat` conversation gets a session id, so its turns group together in
-the dashboard instead of appearing as unrelated runs. Traces carry the model,
-the embedding model, the knowledge domain and `retrieval_k` as metadata, so a
-trace from last month still explains which configuration produced it.
-
-**Why it matters here:** the agent sometimes emits its tool calls in parallel,
-deciding to `calculate` before it has read the retrieved passage. The answer
-can still come out right while the number came from the model's memory rather
-than from the document. In the terminal that is easy to miss. In a trace, the
-two calls hanging off the same model call make it obvious.
-
----
-
 ## Evaluation
 
 Unit tests prove the code does what it was written to do. They say nothing
@@ -1224,274 +1271,6 @@ legitimately varies and a string match cannot tell a faithful sentence from a
 distorted one. That is exactly what `--judge` adds, kept separate and opt-in
 so the reproducible scores stay reproducible.
 
-### Hybrid search
-
-Two retrievers run and their rankings are fused.
-
-An embedding compares meaning, which is what lets a question find a passage
-that shares none of its words. It also spreads a long article's signal across
-everything the article discusses, so one sentence stating a deadline ranks
-below whatever the article is mostly about.
-
-Postgres full text search compares words. It cannot follow a paraphrase, and
-it does not need to
-when the question names the terms the text uses.
-
-Measured on this corpus, on the question the suite failed for weeks: the
-passage stating the suspension deadline sits at **rank 31 by embedding** and at
-**rank 5 by keyword**.
-
-The two lists are merged by reciprocal rank fusion. Each document scores the
-sum of `1 / (60 + rank)` over the lists it appears in, so a passage both
-retrievers rank well beats one a single retriever loves. Fusing on rank rather
-than on score is what makes it work at all: a cosine distance and a text search rank
-are not on the same scale and cannot be added.
-
-Each retriever is asked for five times the passages wanted, and the fused list
-is cut back. Fusing two short lists only rewards what both retrievers already
-agreed on, which is what either would have found alone; the passages worth
-adding sit deeper in one list. Measured here, the missing deadline reaches the
-top eight at a multiplier of five and not at three.
-
-`SEARCH_STRATEGY=vector` turns the keyword half off. The keyword index is built
-once from what is stored and dropped whenever the store changes, since it is a
-copy.
-
-**What it fixed:** the last failing case, and with it `correctness` and
-`faithfulness`. Every metric now reads 100% on 29 questions.
-
-**What that number is worth:** the five deterministic metrics are reproducible,
-so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
-and drifts; one run at 100% is not a guarantee of the next.
-
-### Probes, limits and workers
-
-| Endpoint | Answers | Checks |
-|---|---|---|
-| `GET /health` | liveness | nothing else |
-| `GET /ready` | readiness | database reachable, index populated |
-
-**They were one endpoint once, and it checked the database.** That is
-readiness wearing a liveness name: an orchestrator restarts a process whose
-liveness probe fails, so a database blinking would have restarted every
-replica at once, and that is how one database problem becomes an outage. A
-failed readiness probe takes the instance out of rotation and leaves it
-running, which is the right answer to a dependency that is briefly away.
-
-The container healthcheck points at `/ready`, because Compose's
-`service_healthy` means "ready for traffic".
-
-**Rate limiting** is a moving window per caller: `60/minute` by default, empty
-to disable. A caller is its API key when there is one and its address when
-there is not, and the key is hashed before it becomes a storage key. Every
-answer carries `X-RateLimit-Remaining`, so a client slows down before being
-refused rather than after. The probes are never limited: a balancer polling
-readiness every two seconds would exhaust a per-minute budget on its own.
-
-> **Not slowapi.** It is the usual answer for FastAPI and it does not work
-> here. Both of its middlewares find the route by walking `app.routes` for
-> something with an `.endpoint`, and current FastAPI wraps everything from
-> `include_router` in an `_IncludedRouter` that has none. Every request looks
-> like a route it cannot identify, which it treats as exempt. The failure is
-> silent: the limiter reports itself enabled and the ceiling never fires. What
-> is used instead is `limits`, the library slowapi is built on.
-
-**Workers**: `rag serve --workers 4`, or `API_WORKERS`. One process serialises
-requests, so a question that takes eight seconds blocks every other question
-for those eight seconds. `--reload` needs a single process and wins over
-`--workers`, which the command says rather than silently ignoring one.
-
-### Schema migrations
-
-Alembic owns the extensions and the `portuguese_unaccent` text search
-configuration. The tables belong to langchain-postgres, which creates them on
-first write, and the two search indexes are built after that because they
-cannot exist before the table does.
-
-```bash
-alembic upgrade head      # prepare a database
-alembic revision -m "..."  # start a change
-alembic downgrade -1       # undo the last one
-```
-
-The URL is not in `alembic.ini`. `migrations/env.py` reads `DATABASE_URL`
-through the same settings object the application uses, so there is one place
-that knows where the database is and no credential in a tracked file.
-
-**The application does not apply migrations.** It used to, and that is an
-anti-pattern past one replica: several processes starting together race to
-create the same objects, and a long migration blocks every boot rather than
-one deployment step. What the application does now is check, and fail naming
-the command:
-
-```
-O banco em postgresql+psycopg://rag:***@localhost:5432/rag não tem as
-migrações aplicadas. Rode: alembic upgrade head
-```
-
-In Compose a one-shot `migrate` service runs first and the API waits on
-`service_completed_successfully`.
-
-### Guardrails
-
-Three layers on the way in, one on the way out. They run from
-`agent/service.py`, so the CLI and the API are covered by construction and a
-new interface cannot forget.
-
-| Layer | Checks | On failure |
-|---|---|---|
-| Arithmetic | Empty, and length against `MAX_QUESTION_CHARS` | Refuses |
-| Scanning | Secrets, e-mail, credit card, and **CPF, CNPJ, API keys** | Refuses |
-| Injection | Whether the question is an instruction | Refuses |
-| Output | Citation present, token ceiling | **Records a finding** |
-
-**A question is refused before it costs anything. An answer has already been
-paid for by the time it can be judged**, so what happens to it is a finding
-attached to the result, never an exception. Citation in particular is a
-finding and not a refusal: a correct refusal cites nothing, and this corpus
-has four questions it cannot answer on purpose.
-
-#### LLM Guard, configured rather than used as shipped
-
-LLM Guard is the standard and it is built for English. Its own
-`ALL_SUPPORTED_LANGUAGES` is `["en", "zh"]` and its default entity list is
-`US_SSN` and `US_BANK_NUMBER`. Measured here, before any configuration:
-
-| Question | Verdict |
-|---|---|
-| "qual o prazo máximo de suspensão?" | **refused**, confidence 1.00 |
-| "what is the maximum suspension period?" | passed |
-| "o que diz o Art. 70 da Resolução 160?" | **refused**, read 160 as an account number |
-| a CPF | **passed** |
-
-It refused every real question and missed the one identifier that matters in
-Brazil. What fixed it: dropping its English-only injection scanner, narrowing
-`entity_types` to the language-neutral patterns, and adding CPF, CNPJ and API
-keys by regex.
-
-#### The injection classifier was chosen by measurement
-
-Eight cases, four of them attacks, half in Portuguese:
-
-| Model | Correct | False positives |
-|---|---|---|
-| **`katanemolabs/Arch-Guard`** | **7/8** | **0** |
-| `testsavantai/prompt-injection-defender-large-v0` | 6/8 | 0 |
-| `jackhhao/jailbreak-classifier` | 5/8 | 0 |
-| `protectai/deberta-v3-base-prompt-injection-v2` | 5/8 | **3** |
-
-The last row is LLM Guard's default. Meta's Prompt Guard 2 is the model the
-market reaches for first and is multilingual by design; it is also a gated
-repository, so it needs a licence and a token. `INJECTION_MODEL` switches to
-it in one setting.
-
-#### Indirect injection is the risk that belongs to RAG
-
-A retrieved passage is pasted into the context and the model reads it the way
-it reads the system prompt. A retriever works in embedding space and has no
-notion of "this is data" rather than "this is an instruction", so a document
-carrying a hidden instruction attacks **every question that retrieves it**.
-
-The corpus is therefore scanned **at ingestion**, once per chunk, never per
-question: the documents change only when someone indexes them, so the answer
-cannot change between two questions. Measured on five chunks with one
-poisoned: one flagged, four genuine articles clean.
-
-A flagged chunk warns rather than refuses. This corpus is regulation, and
-regulation tells the reader what to do, so a classifier trained on jailbreaks
-will sometimes read a genuine article as an instruction. Refusing to index
-would silently drop the law.
-
-#### What is not covered
-
-- **Permission-aware retrieval.** Anyone who can ask can retrieve any chunk.
-- **Output PII.** Only the question is scanned.
-- **Rate limiting.** No per-caller cost ceiling yet.
-
-### Reranking
-
-Off by default. This section is as much about why as about how.
-
-**What a reranker is.** A second pass that reorders the passages the search
-already retrieved. It finds nothing of its own.
-
-```
-retrieval  ──▶  24 candidates  ──▶  reranker  ──▶  8 passages  ──▶  agent
-   wide, cheap                       narrow, expensive
-```
-
-**Why it is more accurate.** Every retriever above compares two things through
-something precomputed. A passage is embedded at ingestion, months before the
-question exists, so its vector compresses the text without knowing what will
-be asked of it. A cross-encoder reads the question and the passage together,
-in one forward pass, and answers directly: does this passage answer that one.
-
-That is also why it is expensive. Nothing can be precomputed, so the cost is
-one model pass per candidate, on every question.
-
-| | Embedding | Cross-encoder |
-|---|---|---|
-| Reads the pair together | No | Yes |
-| Computed when | At ingestion | At query time |
-| Cost | A lookup | A forward pass per candidate |
-| Scales to | Millions of passages | Dozens |
-
-**Why it is off here.** A reranker fixes precision. It cannot repair a pool
-the answer is not in. The failure this suite had for weeks was recall:
-measured on this corpus, the passage stating the suspension deadline sat at
-rank 31 of 590 by embedding. With `RETRIEVAL_K=8` a reranker would have been
-handed eight passages that did not contain the answer, and would have returned
-eight passages that still did not. Hybrid search is what fixed it.
-
-Turning it on would add latency and a two gigabyte dependency for a measured
-gain of nothing, on a corpus where every metric already reads 100%.
-
-**What it looks like when it works.** Measured with the default model on five
-real passages from this corpus, with the answer deliberately placed last, as
-it would arrive from a wide pool:
-
-| After reranking | Was | Score | Passage |
-|---|---|---|---|
-| 1 | 5 | `+0.9723` | `§ 2º O prazo de suspensão da oferta não pode ser superior a 30 dias.` |
-| 2 | 2 | `+0.2308` | `Art. 70. A SRE pode suspender ou cancelar, a qualquer tempo…` |
-| 3 | 1 | `+0.0050` | `Art. 12. O lote suplementar não pode ultrapassar 15%…` |
-| 4 | 3 | `+0.0004` | `Art. 25. O prospecto deverá ser elaborado…` |
-| 5 | 4 | `+0.0001` | `Art. 3. Consideram-se atos de distribuição pública…` |
-
-The gap between the first two is the useful part. The passage that merely
-mentions suspension scores 0.23; the one that states the deadline scores 0.97.
-An embedding cannot separate those, because both are about suspending an
-offer.
-
-**When to turn it on.** When the pool is wide enough that the answer is in it
-but not near the top. That is the normal condition at scale, and it is why the
-two-stage shape exists at all: with millions of passages you must retrieve
-a hundred or more to be confident of recall, and a hundred passages do not fit
-in a prompt. The reranker is the funnel between those two facts.
-
-```bash
-RERANK_STRATEGY=cross_encoder rag ask "qual o prazo de suspensão?"
-```
-
-The package is already installed: guardrails need torch, so the reranker costs
-almost nothing on top of it. The weights are a 2.2 GB download on first use.
-
-The pool widens on its own when it is enabled: `RERANK_CANDIDATES` replaces
-`RETRIEVAL_K` as the retrieval width, because a reranker handed exactly what
-it returns has nothing to choose between.
-
-**On the dependency.** A local cross-encoder means torch. That used to be
-the argument for keeping it optional, and it stopped being one when the
-guardrails made torch a hard dependency anyway. At scale the answer is neither
-in-process nor optional, it is a reranking service of its own, so the model is
-loaded once behind an endpoint instead of once per API replica. The interface
-here is one method, so that is a class, not a rewrite.
-
-**On sending text to an API.** Cohere Rerank is the commercial standard and is
-very good. It also means the corpus leaves the network. For a regulated
-institution that is usually the end of the discussion, which is why the local
-model is the default choice here.
-
 ### The six metrics
 
 | Metric | Needs the expected answer? | What it checks |
@@ -1608,7 +1387,213 @@ question itself was ambiguous. Mistaking the third for the first means
 "fixing" an agent that was right.
 
 ---
+## Observability
 
+Every answer already reports its own cost locally. That tells you the total;
+it does not tell you where the time and the tokens went. For that, the agent
+can emit a full trace to [Langfuse](https://langfuse.com), with one row per
+model call, tool call and retrieval, each carrying its own latency, tokens and
+price.
+
+```
+rag.ask                                    3.78s   1634 tok   $0.00031
+├─ ChatOpenAI                              1.71s    411 tok
+│    └─ decided: search_documentation
+├─ tool: search_documentation              0.54s
+└─ ChatOpenAI                              1.52s   1223 tok
+     └─ final answer
+```
+
+Turn it on by setting both keys. A free account at
+[cloud.langfuse.com](https://cloud.langfuse.com) is enough:
+
+```
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com     # or https://us.cloud.langfuse.com
+```
+
+Leave them out and nothing is sent, nothing is imported, and the agent behaves
+identically. Observability must never break the thing it observes, so a rejected key or an
+unreachable Langfuse logs a warning and disables itself instead of failing the
+answer.
+
+Each `rag chat` conversation gets a session id, so its turns group together in
+the dashboard instead of appearing as unrelated runs. Traces carry the model,
+the embedding model, the knowledge domain and `retrieval_k` as metadata, so a
+trace from last month still explains which configuration produced it.
+
+**Why it matters here:** the agent sometimes emits its tool calls in parallel,
+deciding to `calculate` before it has read the retrieved passage. The answer
+can still come out right while the number came from the model's memory rather
+than from the document. In the terminal that is easy to miss. In a trace, the
+two calls hanging off the same model call make it obvious.
+
+---
+## Prompt management
+
+The prompt decides how the agent behaves, and it changes far more often than
+the code around it. Kept as a string in the source, every wording change costs
+a commit, a build and a deploy, and no record survives of which text produced
+which score.
+
+Published to Langfuse, it becomes a versioned asset:
+
+```bash
+rag prompt push -m "regra nova sobre citação"   # publish under the label
+rag prompt show                                 # what is in force, and where from
+```
+
+```
+$ rag prompt show
+origem       Langfuse v1
+label        production
+domínio      regulacao do mercado de capitais brasileiro (resolucoes da CVM)
+╭─ system ────────────────────────────────────────────────────╮
+│ Você é um assistente especializado em regulacao do mercado  │
+│ de capitais brasileiro (resolucoes da CVM).                 │
+...
+```
+
+Editing the text in the Langfuse UI and moving the `production` label is how a
+new version reaches the agent. Rolling back is moving the label to the previous
+one. Neither touches the repository.
+
+### What is published, and what is not
+
+Three prompts go to Langfuse:
+
+| Prompt | What the model does with it |
+|---|---|
+| `rag-agent-system` | The rules it answers under |
+| `rag-agent-search-tool` | Decides whether a question needs retrieval |
+| `rag-agent-calculator-tool` | Decides whether a question needs arithmetic |
+
+The line is what the text is for. A **description the model reads to decide**
+is tuned the way a prompt is tuned, so it belongs where prompts are versioned.
+The tool descriptions are exactly that: the model never sees a tool's body,
+only its name and its description, and rewording one changes when it gets
+called.
+
+What stays in the code is the text a tool **returns**: `"Divisão por zero."`,
+`"Nenhum trecho relevante encontrado na documentação."`. Those report what
+happened during a run. They are facts about execution rather than instructions,
+and nobody A/B tests them.
+
+`_NO_RESULTS` sits closest to the line, since it is what prompts the agent to
+say it found nothing. It stays in code because it states a fact; the
+instruction to admit ignorance lives in the system prompt, where it can be
+tuned.
+
+Both tools are therefore built by a factory rather than the `@tool` decorator:
+a decorator freezes the docstring at import, and a description fetched at call
+time is the whole point.
+
+### It never blocks an answer
+
+Without Langfuse configured, the templates in `prompts.py` are used and
+everything works. With Langfuse configured but unreachable, the same templates
+are used and a warning is logged. A prompt store that can stop the agent from
+answering is worse than no prompt store.
+
+The SDK caches for `PROMPT_CACHE_SECONDS`, so a request does not pay a round
+trip to fetch text that rarely changes.
+
+### One placeholder syntax
+
+Templates use `{{domain}}`, the form Langfuse compiles, on both paths. The
+local text is therefore published verbatim, and the same string renders whether
+it came from the platform or from the file.
+
+### Recorded with the score
+
+Every evaluation report carries `prompt_source` and `prompt_version` alongside
+the model and the chunking. A run graded against version 3 cannot be compared
+to one graded against version 4, and now the report says which was in force.
+
+---
+## Feedback
+
+The evaluation dataset is written by whoever built the system, which means it
+tests the questions that person thought of. Feedback from real use is the only
+source of the ones they did not.
+
+Every answer carries a `run_id`. Send it back with a verdict:
+
+```bash
+curl -X POST localhost:8080/feedback -H "Content-Type: application/json"   -d '{"run_id": "9b8c3a27...", "useful": false, "comment": "citou o artigo errado"}'
+```
+
+The verdict is recorded in Langfuse as a score on the trace that produced the
+answer, which is where the platform already holds the prompt, the retrieved
+passages and the cost of that same run. Send the `trace_id` alongside the
+`run_id` to attach it.
+
+A local copy is appended to `logs/feedback.jsonl` as well, so the loop still
+closes with tracing switched off:
+
+```json
+{"recorded_at": "2026-08-31T15:31:04+00:00", "run_id": "9b8c3a27...",
+ "useful": false, "comment": "citou o artigo errado", "sent_to_langfuse": true}
+```
+
+**What it is for.** The rejected answers are the candidates for new evaluation
+cases. A question the agent got wrong in real use belongs in `dataset.json`,
+and from then on it cannot regress unnoticed. That loop is what keeps the
+suite from testing only what was imagined on the first day.
+
+Nothing validates that a `run_id` belongs to a real answer. Rejecting unknown
+ids would mean holding every answer in memory, and an occasional stray entry
+costs less than that.
+
+---
+## Project structure
+
+```
+src/rag_agent/
+├── config.py          settings, read from the environment and validated at boot
+├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
+├── providers.py       LLM and embedding clients, the only place OpenAI appears
+├── cli.py             presentation only, no domain logic
+│
+├── prompts/           the instructions, and where they are read from
+│   ├── __init__.py        fetch from Langfuse, render, fall back to the text
+│   └── templates.py       the text itself, and nothing else
+│
+├── observability/     what the run did, what it cost, and writing it down
+│   ├── tracing.py         Langfuse: traces, scores, prompt registry
+│   ├── pricing.py         token prices, dated
+│   └── logging_setup.py   console and file
+│
+├── indexing/          loader · splitter · vector_store · hybrid
+├── tools/             one module per tool, registered in build_tools()
+├── agent/             service (build + orchestration) · trace
+├── api/               routes · schemas · sessions · security · feedback
+└── evaluation/        dataset · metrics · runner · comparison · configuration
+```
+
+Four loose modules and seven packages. The four are the ones every layer
+reaches for and none of them owns: settings, domain types, the provider
+boundary, and the terminal.
+
+Only three directories, and each earns it: `indexing/` grows with every new
+file format, `tools/` with every new tool, `agent/` holds the orchestration.
+Everything else is a single module.
+
+| To change... | Edit |
+|---|---|
+| The knowledge base | `data/`, then `rag ingest` |
+| How the agent behaves | Langfuse, or `prompts/templates.py` as the fallback |
+| Add a tool | `tools/` |
+| Chunking or retrieval | `.env` |
+| The model provider | `providers.py` |
+| Token prices | `observability/pricing.py` |
+| Add an endpoint | `api/routes.py` |
+
+Interfaces stay thin because orchestration lives in `agent/service.py`. Adding
+an HTTP API or a bot means wrapping that service, not rewriting it.
+
+---
 ## Development
 
 With the environment active:
@@ -1634,7 +1619,6 @@ service loop with a fake model) and need no API key. Tests marked
 `integration` hit the real embedding API and are skipped without one.
 
 ---
-
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -1654,7 +1638,6 @@ service loop with a fake model) and need no API key. Tests marked
 | Postgres unreachable | `docker compose up -d postgres`, or check `DATABASE_URL` |
 
 ---
-
 ## License
 
 MIT.

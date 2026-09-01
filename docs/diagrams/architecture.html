@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RAG Agent Architecture</title>
+<style>
+  :root {
+    --bg:      #070d1a;
+    --rail:    #0d1a33;
+    --panel:   #101d36;
+    --box:     #16253f;
+    --line:    #24365a;
+
+    --ink:     #eaf0fb;
+    --ink-2:   #a6b6d4;
+    --ink-3:   #6d80a3;
+
+    --accent:  #ff6a1f;
+    --accent-2:#ff9557;
+    --accent-d:#3a1c0c;
+    --good:    #34d399;
+  }
+
+  /* Rendered at twice the layout size so the PNG has two device pixels per
+     CSS pixel. GitHub shows it at about 850 wide, and downscaling a 2x raster
+     is what keeps the type crisp. */
+  html { zoom: 2; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 14px/1.4 "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 38px;
+    width: 1900px;
+  }
+  code, .mono { font-family: "SF Mono", "Cascadia Mono", Consolas, monospace; }
+
+  /* ------------------------------------------------------------ header */
+  header { margin-bottom: 24px; display: flex; align-items: flex-end; gap: 20px; }
+  h1 { font-size: 29px; font-weight: 700; letter-spacing: -0.025em; }
+  .tagline { color: var(--ink-2); font-size: 14.5px; padding-bottom: 3px; }
+  .tagline b { color: var(--ink); font-weight: 600; }
+
+  /* ------------------------------------------------------------ layout */
+  .sheet { display: flex; gap: 16px; align-items: stretch; }
+  .lanes { flex: 1; display: flex; flex-direction: column; gap: 16px; }
+
+  .lane {
+    display: flex;
+    background: var(--rail);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .lane-name {
+    width: 54px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+  }
+  .lane-name span {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .lane-body {
+    flex: 1;
+    display: flex;
+    gap: 14px;
+    padding: 14px;
+    align-items: stretch;
+  }
+  .lane-body.stack { flex-direction: column; }
+
+  /* ------------------------------------------------------------- panel */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 13px 14px 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel > h3 {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+  .panel > h3 em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--ink-3);
+    font-size: 11.5px;
+    margin-left: 8px;
+  }
+
+  /* --------------------------------------------------------- flow row */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .flow > .box { flex: 1; }
+
+  .box {
+    background: var(--box);
+    border: 1px solid var(--accent);
+    border-radius: 9px;
+    padding: 9px 11px;
+    min-height: 62px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .box .t { font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+  .box .m { font-size: 10.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.35; }
+  .box .w { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; font-style: italic; line-height: 1.3; }
+
+  .box.dim   { border-color: var(--line); opacity: 0.6; }
+  .box.plain { border-color: var(--line); }
+  .box.good  { border-color: #2f7a5c; }
+
+  .arrow {
+    flex: none;
+    width: 26px;
+    align-self: center;
+    height: 2px;
+    background: var(--accent);
+    position: relative;
+    opacity: 0.85;
+  }
+  .arrow::after {
+    content: "";
+    position: absolute;
+    right: -1px; top: -4px;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 7px solid var(--accent);
+  }
+  .arrow.soft { background: var(--line); }
+  .arrow.soft::after { border-left-color: var(--line); }
+
+  .bar {
+    margin-top: 11px;
+    background: var(--box);
+    border: 1px solid var(--accent);
+    border-radius: 9px;
+    padding: 9px 12px;
+    text-align: center;
+  }
+  .bar .t { font-size: 12.5px; font-weight: 600; }
+  .bar .m { font-size: 10.5px; color: var(--ink-2); margin-top: 3px; }
+
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 7px;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+  .row:last-child { border-bottom: none; padding-bottom: 0; }
+  .row .k { font-size: 12px; font-weight: 600; min-width: 108px; }
+  .row .v { font-size: 11px; color: var(--ink-2); }
+  .row .v code { font-size: 10.5px; color: var(--ink-2); }
+
+  .tag {
+    display: inline-block;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 1px 5px; border-radius: 3px; margin-left: 5px;
+    vertical-align: 1px;
+  }
+  .tag-m { background: #10261f; color: var(--good); border: 1px solid #2f7a5c; }
+  .tag-o { background: #1a2438; color: var(--ink-3); border: 1px solid var(--line); }
+
+  /* -------------------------------------------------------- governance */
+  .gov {
+    width: 280px;
+    flex: none;
+    background: var(--accent-d);
+    border: 2px solid var(--accent);
+    border-radius: 14px;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .gov h2 {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #ffd9c2;
+    margin-bottom: 16px;
+  }
+  .gov-item { padding: 11px 0; border-bottom: 1px solid var(--accent); }
+  .gov-item:last-child { border-bottom: none; }
+  .gov-item .t { font-size: 12.5px; font-weight: 600; color: #ffe6d6; }
+  .gov-item .m { font-size: 10.5px; color: #f2b795; margin-top: 4px; line-height: 1.4; }
+  .gov-item .m code { font-size: 10px; }
+  .gov .grow { flex: 1; min-height: 8px; }
+
+  /* ------------------------------------------------------------ footer */
+  .strip {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .strip .label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-3); padding-right: 4px;
+  }
+  .chip {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip.good { border-color: #2f7a5c; background: #0d2119; }
+  .chip.good b { color: var(--good); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RAG Agent</h1>
+  <p class="tagline">
+    Agentic retrieval over your own documents ·
+    <b>hybrid search</b> · <b>six graded metrics</b> · <b>guardrails on both sides</b>
+  </p>
+</header>
+
+<div class="sheet">
+
+  <div class="lanes">
+
+    <!-- =================================================== BUILD LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>Build</span></div>
+      <div class="lane-body stack">
+
+        <div class="panel">
+          <h3>Ingestion and storage <em>offline · rag ingest</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Load</div>
+              <div class="m mono">pypdf</div>
+              <div class="w">pdf, md, txt</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Split<span class="tag tag-m">measured</span></div>
+              <div class="m mono">text-splitters</div>
+              <div class="w">by article, beat by character</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Scan corpus</div>
+              <div class="m mono">Arch-Guard</div>
+              <div class="w">indirect injection</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Embed</div>
+              <div class="m mono">text-embedding-3-small</div>
+              <div class="w">1536 dimensions</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Store</div>
+              <div class="m mono">pgvector · Postgres 17</div>
+              <div class="w">one transaction</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Index</div>
+              <div class="m mono">HNSW · GIN</div>
+              <div class="w">vector and text</div>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="t">Idempotent by construction</div>
+            <div class="m mono">id = sha256(source + text) · re-ingesting overwrites · a queue may redeliver · rag sources --remove takes one document out</div>
+          </div>
+        </div>
+
+        <div class="lane-body" style="padding:0; gap:14px;">
+          <div class="panel" style="flex:1.45">
+            <h3>Retrieval <em>two retrievers, one ranking</em></h3>
+            <div class="flow">
+              <div class="box">
+                <div class="t">Vector search</div>
+                <div class="m mono">pgvector, HNSW</div>
+                <div class="w">meaning · follows a paraphrase</div>
+              </div>
+              <div class="arrow"></div>
+              <div class="box">
+                <div class="t">Keyword search</div>
+                <div class="m mono">Postgres FTS, GIN</div>
+                <div class="w">identity · finds exact codes and references</div>
+              </div>
+              <div class="arrow"></div>
+              <div class="box">
+                <div class="t">RRF fusion<span class="tag tag-m">measured</span></div>
+                <div class="m mono">Σ 1/(60 + rank)</div>
+                <div class="w">merges on rank, not score · pulled the missing passage into the window</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box dim">
+                <div class="t">Reranking<span class="tag tag-o">OFF</span></div>
+                <div class="m mono">bge-reranker-v2-m3</div>
+                <div class="w">fixes precision; the gap here was recall</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="flex:1">
+            <h3>Evaluation <em>rag eval · graded questions, some unanswerable</em></h3>
+            <div class="flow">
+              <div class="box good">
+                <div class="t">Reference based</div>
+                <div class="m mono">retrieval · citation<br>correctness · refusal</div>
+                <div class="w">against the expected answer</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box good">
+                <div class="t">Reference free</div>
+                <div class="m mono">groundedness<br>faithfulness</div>
+                <div class="w">against what was retrieved</div>
+              </div>
+              <div class="arrow soft"></div>
+              <div class="box good">
+                <div class="t">Gate</div>
+                <div class="m mono">--min-score<br>--max-cost</div>
+                <div class="w">the exit code is the contract</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================================================== SERVE LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>Serve</span></div>
+      <div class="lane-body">
+
+        <div class="panel" style="flex:1.45">
+          <h3>Answering a question <em>online · CLI and HTTP, one service layer</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Guardrails in</div>
+              <div class="m mono">LLM Guard · presidio</div>
+              <div class="w">length · CPF · CNPJ · keys · injection</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Agent</div>
+              <div class="m mono">create_agent · LangGraph</div>
+              <div class="w">model ⇄ tools · 3 searches per turn</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Retrieve</div>
+              <div class="m mono">hybrid, fused</div>
+              <div class="w">the panel above</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Answer</div>
+              <div class="m mono">gpt-4o-mini · t=0</div>
+              <div class="w">cited, or an honest refusal</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Guardrails out</div>
+              <div class="m mono">citation · token ceiling</div>
+              <div class="w">records, never blocks</div>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="t">One service layer, and it knows about neither</div>
+            <div class="m mono">agent/service.py holds the turn · the CLI and the API translate in and out · the guardrails run here, so a third interface is covered by construction</div>
+          </div>
+          <div class="bar" style="border-color: var(--line);">
+            <div class="t">A refusal is not a failure</div>
+            <div class="m mono">CLI: a yellow line and exit code 2 · HTTP: 400 with the reason in its own field · 500 would page someone for a guardrail doing its job</div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Operating it <em>FastAPI · Uvicorn · Redis</em></h3>
+          <div class="rows">
+            <div class="row">
+              <span class="k">Tracing</span>
+              <span class="v">Langfuse: every turn, its tools, its tokens and its cost</span>
+            </div>
+            <div class="row">
+              <span class="k">Probes</span>
+              <span class="v"><code>/health</code> liveness, checks nothing else · <code>/ready</code> readiness, checks the database and the index</span>
+            </div>
+            <div class="row">
+              <span class="k">Rate limit</span>
+              <span class="v">moving window per caller, shared through Redis so workers keep one ceiling</span>
+            </div>
+            <div class="row">
+              <span class="k">Concurrency</span>
+              <span class="v">Uvicorn workers · sessions in Redis, message history only</span>
+            </div>
+            <div class="row">
+              <span class="k">Failure</span>
+              <span class="v">every message names the command that fixes it</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================================================= LLMOPS LANE -->
+    <div class="lane">
+      <div class="lane-name"><span>LLMOps</span></div>
+      <div class="lane-body">
+
+        <div class="panel" style="flex:1">
+          <h3>Quality gates <em>every push</em></h3>
+          <div class="flow">
+            <div class="box good">
+              <div class="t">Tests</div>
+              <div class="m mono">pytest · xdist</div>
+              <div class="w">unit with no infrastructure, integration behind a mark</div>
+            </div>
+            <div class="arrow soft"></div>
+            <div class="box good">
+              <div class="t">Static checks</div>
+              <div class="m mono">ruff · mypy</div>
+              <div class="w">lint, format and types, all strict</div>
+            </div>
+            <div class="arrow soft"></div>
+            <div class="box good">
+              <div class="t">Coverage</div>
+              <div class="m mono">pytest-cov</div>
+              <div class="w">reported per module, not as one number</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Delivery <em>the same artefact everywhere</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">CI</div>
+              <div class="m mono">GitHub Actions</div>
+              <div class="w">Linux and Windows, so a platform break shows here</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Image</div>
+              <div class="m mono">Docker multi-stage</div>
+              <div class="w">non-root · CPU-only torch · serves and migrates</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Migrate</div>
+              <div class="m mono">alembic upgrade head</div>
+              <div class="w">one shot before the API, never at boot</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="flex:1">
+          <h3>Continuous evaluation <em>on demand and weekly</em></h3>
+          <div class="flow">
+            <div class="box">
+              <div class="t">Scheduled run</div>
+              <div class="m mono">cron · Mondays</div>
+              <div class="w">the corpus stops changing; the model does not</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Compare</div>
+              <div class="m mono">rag eval --compare</div>
+              <div class="w">what moved, and which setting moved with it</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="box">
+              <div class="t">Fail the build</div>
+              <div class="m mono">score and cost thresholds</div>
+              <div class="w">a regression blocks; one known failure does not</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ==================================================== GOVERNANCE -->
+  <aside class="gov">
+    <h2>LLM<br>Governance</h2>
+
+    <div class="gov-item">
+      <div class="t">Prompt management</div>
+      <div class="m">Four prompts in Langfuse under a <code>production</code> label. Moving the label is a rollback with no deploy. Falls back to <code>templates.py</code>.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Safety policy</div>
+      <div class="m">Refused before it costs: injection, CPF, CNPJ, API keys. Flagged after it is paid for: a missing citation.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Schema control</div>
+      <div class="m">Alembic owns the schema. The application checks and refuses, naming <code>alembic upgrade head</code>. It never migrates itself.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Reproducibility</div>
+      <div class="m">Every run records its model, chunking, <code>RETRIEVAL_K</code> and prompt hash. A score without them compares to nothing.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Cost control</div>
+      <div class="m">Per-answer estimate, a token ceiling, a search budget per turn, and <code>--max-cost</code> on the suite.</div>
+    </div>
+
+    <div class="gov-item">
+      <div class="t">Audit</div>
+      <div class="m">Question, retrieved passages and answer are one trace. Rotating local logs keep what the platform does not.</div>
+    </div>
+
+    <div class="grow"></div>
+    <div class="gov-item" style="border-top:1px solid var(--accent); border-bottom:none;">
+      <div class="m">Not covered yet: permission-aware retrieval, and scanning the answer for personal data.</div>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>

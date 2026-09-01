@@ -214,6 +214,12 @@ class Settings(BaseSettings):
     # one client in a retry loop spends the model budget.
     rate_limit: str = Field(default="60/minute")
 
+    # Where the rate limit counters live. Empty keeps them in the process,
+    # which means N workers enforce the ceiling N times over: four workers
+    # turn 60/minute into 240/minute. Point it at the Redis that is already
+    # in the compose file and the ceiling becomes one ceiling.
+    rate_limit_storage: str = Field(default="")
+
     # Uvicorn processes. One request that takes eight seconds blocks every
     # other request for those eight seconds in a single process. Ignored
     # together with --reload, which needs one process to re-import into.

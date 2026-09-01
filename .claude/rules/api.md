@@ -111,9 +111,17 @@ slowapi, is used directly.
 `EXEMPT_PATHS` covers the probes and the docs. A balancer polling readiness
 every two seconds would exhaust a per-minute budget on its own.
 
-The storage is per process, so N replicas enforce the ceiling N times over.
-`limits` also speaks Redis, and the compose file already has one: that is a
-constructor argument, not a rewrite.
+`RATE_LIMIT_STORAGE` decides where the counters live, and it is the difference
+between one ceiling and N. Measured with three per minute across two
+processes: in-process lets all six through, Redis lets three.
+
+An unreachable store falls back to in-process with a warning rather than
+failing to start. Accuracy is the right thing to lose there; a ceiling
+enforced per worker is too loose, and no service at all is worse.
+
+`storage_from_string` can also build the asyncio variant, which this
+synchronous middleware cannot drive, so a non-sync URI is refused at
+construction rather than at the first request.
 
 ## Not there yet
 
@@ -122,5 +130,4 @@ ready:
 
 - No CORS configuration
 - No per-tenant isolation or permission-aware retrieval
-- Rate limit storage is per process, not shared across replicas
 - The answer is not scanned for PII, only the question
