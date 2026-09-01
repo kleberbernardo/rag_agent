@@ -37,10 +37,10 @@ class OutputFinding:
     detail: str
 
 
-_EMPTY = "Pergunta vazia."
-_TOO_LONG = "Pergunta com {length} caracteres; o limite é {limit}."
-_REFUSED = "Pergunta recusada pela varredura de segurança: {reason}."
-_INJECTION = "Pergunta recusada: parece uma tentativa de injeção de prompt ({label})."
+_EMPTY = "A pergunta está vazia."
+_TOO_LONG = "A pergunta tem {length} caracteres; o limite é {limit}."
+_REFUSED = "A varredura de segurança encontrou dado sensível na pergunta ({reason})."
+_INJECTION = "Parece uma tentativa de injeção de prompt ({label})."
 
 
 def check_question(question: str) -> None:
@@ -69,12 +69,13 @@ def check_question(question: str) -> None:
 
     result = scan_question(question)
     if not result.valid:
-        logger.warning("Question refused by the scanners: %s", result.reason)
+        # The caller is told; this is for the file, where the record lives.
+        logger.info("Question refused by the scanners: %s", result.reason)
         raise GuardrailViolation("scanner", _REFUSED.format(reason=result.reason))
 
     verdict = classify(question)
     if verdict.detected:
-        logger.warning("Injection suspected: %s at %.2f", verdict.label, verdict.score)
+        logger.info("Injection suspected: %s at %.2f", verdict.label, verdict.score)
         raise GuardrailViolation("injection", _INJECTION.format(label=verdict.label))
 
 

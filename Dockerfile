@@ -14,8 +14,14 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
+# torch arrives with the guardrails, and the wheel PyPI serves on Linux
+# bundles the CUDA runtime: roughly three gigabytes of nvidia libraries for a
+# container with no GPU to use them. Installing it from PyTorch's CPU index
+# first means pip already has it satisfied when the project asks. Nothing here
+# needs a GPU: inference is a small classifier over one question at a time.
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip \
+ && /opt/venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu \
  && /opt/venv/bin/pip install .
 
 # ------------------------------------------------------------- runtime stage

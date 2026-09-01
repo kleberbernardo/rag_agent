@@ -41,7 +41,9 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
 
       # A fork's pull request never receives secrets. Skipping with a clear
       # message beats failing with an authentication error nobody can fix.

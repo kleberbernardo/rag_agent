@@ -11,7 +11,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from rag_agent import __version__
 from rag_agent.api.feedback import FeedbackStore
@@ -19,6 +20,7 @@ from rag_agent.api.routes import router
 from rag_agent.api.security import require_api_key
 from rag_agent.api.sessions import InMemorySessionStore, RedisSessionStore, SessionStore
 from rag_agent.config import SessionBackend, get_settings
+from rag_agent.guardrails import GuardrailViolation
 from rag_agent.indexing import count_documents, describe_location
 from rag_agent.observability import setup_logging
 
@@ -96,8 +98,33 @@ def create_app() -> FastAPI:
     # no-op, which is what keeps `rag serve` working on a laptop.
     app.include_router(router, dependencies=[Depends(require_api_key)])
 
+    app.add_exception_handler(GuardrailViolation, _refused)
+
     logger.info("API ready for domain: %s", settings.knowledge_domain)
     return app
+
+
+async def _refused(request: Request, error: Exception) -> JSONResponse:  # noqa: ARG001
+    """Turn a guardrail refusal into 400, not 500.
+
+    The request was understood and rejected on purpose, which is the
+    definition of a client error. Returning 500 would page whoever is on call
+    for a guardrail doing its job, and would tell the caller to retry
+    something that will be refused again.
+
+    The reason travels in its own field so a caller can branch on it without
+    parsing Portuguese.
+    """
+    refusal = error if isinstance(error, GuardrailViolation) else None
+    logger.info("Refused a request: %s", refusal.reason if refusal else error)
+
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "detail": refusal.detail if refusal else str(error),
+            "reason": refusal.reason if refusal else "guardrail",
+        },
+    )
 
 
 app = create_app()

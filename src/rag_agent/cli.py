@@ -37,7 +37,7 @@ from rag_agent.evaluation import (
     summarise,
     sync_dataset,
 )
-from rag_agent.guardrails import describe_guardrails
+from rag_agent.guardrails import GuardrailViolation, describe_guardrails
 from rag_agent.indexing import (
     DatabaseUnavailableError,
     count_documents,
@@ -279,7 +279,7 @@ def ask_command(
     _require_index()
 
     with console.status("[cyan]Pensando..."):
-        result = ask(question)
+        result = _ask_or_exit(question)
 
     _render(result, show_trace=trace)
     flush_traces()
@@ -313,8 +313,14 @@ def chat(trace: bool = TraceOption, verbose: bool = VerboseOption) -> None:
             flush_traces()
             break
 
-        with console.status("[cyan]pensando..."):
-            result = session.send(question)
+        try:
+            with console.status("[cyan]pensando..."):
+                result = session.send(question)
+        except GuardrailViolation as refusal:
+            # A conversation survives a refused question: the guardrail runs
+            # before the history grows, so the next turn is unaffected.
+            _print_refusal(refusal)
+            continue
 
         console.print(f"[bold green]agente[/] > {escape(result.answer)}")
         if trace:
@@ -647,6 +653,24 @@ def _require_index() -> None:
     if _count_or_exit() == 0:
         console.print(_EMPTY_INDEX_HINT)
         raise typer.Exit(code=1)
+
+
+def _ask_or_exit(question: str) -> AnswerResult:
+    """Ask, and turn a refusal into a message instead of a stack trace."""
+    try:
+        return ask(question)
+    except GuardrailViolation as refusal:
+        _print_refusal(refusal)
+        raise typer.Exit(code=2) from refusal
+
+
+def _print_refusal(refusal: GuardrailViolation) -> None:
+    """Say what was refused and why, without the traceback.
+
+    A guardrail firing is the system working, not failing. Printing a stack
+    trace for it teaches the reader that guardrails are bugs.
+    """
+    console.print(f"[yellow]Recusado:[/] {escape(refusal.detail)}")
 
 
 def _count_or_exit() -> int:
