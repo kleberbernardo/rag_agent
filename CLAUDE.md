@@ -58,6 +58,7 @@ docker compose up -d postgres    # required for anything that touches the store
 | Task | Command |
 |---|---|
 | Unit tests, no infrastructure | `pytest tests/unit` |
+| Integration, needs Postgres | `pytest -m integration` |
 | Everything except integration | `pytest -m "not integration"` |
 | One file | `pytest tests/unit/test_search.py` |
 | One test | `pytest tests/unit/test_search.py::TestPoolWidth::test_the_vector_only_strategy_skips_the_fusion_multiplier` |
@@ -115,7 +116,7 @@ question ─┬─▶ pgvector (meaning)   ─┐
 
 Details in [indexing.md](.claude/rules/indexing.md).
 
-## The six things that break silently
+## The seven things that break silently
 
 1. **The retrieval pool width depends on whether reranking is on.** With it
    off, the pool is `RETRIEVAL_K` because the pool is the answer. Changing this
@@ -133,11 +134,15 @@ Details in [indexing.md](.claude/rules/indexing.md).
    `get_settings.cache_clear()`. A new setting also needs its name added to the
    `isolated_environment` fixture in `tests/conftest.py`.
 
-5. **`entity_types` filters the custom regex patterns by name.** A pattern
+5. **The chunk id includes the collection name.** It is the primary key of
+   a shared table, so without it the same chunk cannot live in two
+   collections: the second write moves the row out of the first.
+
+6. **`entity_types` filters the custom regex patterns by name.** A pattern
    added to `regex_patterns` and missing from `ENTITY_TYPES` is built and
    never consulted, which is how CPF detection was silently dead once.
 
-6. **A `ChatSession` cannot be pickled.** Redis storage persists only
+7. **A `ChatSession` cannot be pickled.** Redis storage persists only
    `messages_to_dict()` as JSON. State added outside the message history will
    not survive a round trip.
 
@@ -149,6 +154,5 @@ Do not present these as solved:
 |---|---|
 | `cli.py` is 634 lines at 0% coverage | Largest file. Split before adding a command |
 | No permission-aware retrieval | Anyone who can ask can retrieve any chunk |
-| `splitter.py` at 52% coverage | The article-splitting paths are under-tested |
 | No CORS, and the rate limit is per process | See [api.md](.claude/rules/api.md) |
 | `OPENAI_API_KEY` is not a GitHub secret | `evaluation.yml` silently skips |

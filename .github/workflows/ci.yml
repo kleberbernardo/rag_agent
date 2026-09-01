@@ -57,6 +57,51 @@ jobs:
       - name: Tests
         run: pytest -m "not integration" --cov=rag_agent --cov-report=term-missing
 
+  # The SQL only runs here. A DELETE with a wrong WHERE passes every unit test
+  # and empties the index in production, so the store is exercised against a
+  # real Postgres. The embeddings are faked in these tests, which is what lets
+  # them run without an API key.
+  integration:
+    name: integration (postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: rag
+          POSTGRES_DB: rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+
+      # The application never migrates itself, so the suite does not either.
+      - name: Migrate
+        run: alembic upgrade head
+
+      - name: Tests
+        run: pytest -m integration
+
   docker:
     name: docker build
     runs-on: ubuntu-latest

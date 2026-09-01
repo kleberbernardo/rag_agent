@@ -94,6 +94,24 @@ never user input.
 what turns the column into a fixed-size vector, which is what HNSW can be built
 on. `text-embedding-3-small` is 1536, `text-embedding-3-large` is 3072.
 
+## The chunk id includes the collection
+
+`_stable_id` hashes **collection, source and content**, and the collection is
+not optional. `langchain_pg_embedding.id` is the primary key of a table every
+collection shares, so an id derived from the content alone means the same
+chunk cannot exist in two collections: writing it into the second silently
+moves the row out of the first, and the second reports that nothing was
+written.
+
+That was a real defect, found only when two tests using throwaway collections
+indexed the same fixture. It is invisible with one collection and wrong the
+moment there are two, which is what a second corpus, a tenant, or an A/B of a
+chunking strategy is. `TestCollectionIsolation` in
+`tests/integration/test_store.py` holds it down.
+
+**Changing the id shape means re-ingesting.** Old rows keep their old ids and
+are never overwritten, so they linger and compete for retrieval.
+
 ## Removing one document
 
 `delete_source(name)` matches on `cmetadata->>'source'`, the file name the
@@ -120,3 +138,9 @@ test: the rows are scoped by collection anyway, and creating one costs a single
 insert.
 
 Unit tests never need Postgres. `pytest tests/unit` runs with nothing up.
+
+`tests/integration/test_store.py` exercises every statement in this module
+against a real database, with a fake deterministic embedding so it needs no
+API key. CI runs it in its own job with a `pgvector/pgvector:pg17` service,
+because SQL is the one thing a mock cannot check: a `DELETE` with a wrong
+`WHERE` passes every unit test and empties the index in production.

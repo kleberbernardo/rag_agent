@@ -314,12 +314,19 @@ def _warn_about_injection(chunks: list[Document]) -> None:
 
 
 def _stable_id(chunk: Document) -> str:
-    """Derive a deterministic id from the chunk's source and content.
+    """Derive a deterministic id from the collection, source and content.
 
     This is what makes ingestion idempotent: running it twice overwrites the
-    same records instead of duplicating the whole index. It is also what makes
-    the ingestion safe to retry from a queue, where the same message can be
+    same records instead of duplicating the whole index, and it is what makes
+    ingestion safe to retry from a queue where the same message can be
     delivered more than once.
+
+    **The collection is part of the hash, and has to be.** The id is the
+    primary key of a table every collection shares, so an id derived from the
+    content alone means the same chunk cannot exist in two collections:
+    writing it into the second silently moves the row out of the first, and
+    the second reports nothing was written. Invisible with one collection,
+    and wrong the moment there are two.
     """
-    raw = f"{chunk.metadata.get('source', '')}::{chunk.page_content}"
+    raw = f"{get_settings().collection_name}::{chunk.metadata.get('source', '')}::{chunk.page_content}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

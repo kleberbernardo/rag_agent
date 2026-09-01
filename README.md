@@ -456,9 +456,18 @@ vector: a list of numbers positioning that text in semantic space. Chunks that
 mean similar things land near each other.
 
 **Store**. Vectors are written to Postgres. Each chunk gets an id derived from
-a hash of its source and content, so re-ingestion overwrites instead of
-duplicating. That is also what makes ingestion safe to retry from a queue,
-where the same message can be delivered more than once.
+a hash of its **collection, source and content**, so re-ingestion overwrites
+instead of duplicating. That is also what makes ingestion safe to retry from a
+queue, where the same message can be delivered more than once.
+
+> The collection is part of that hash because the id is the primary key of a
+> table every collection shares. Derived from the content alone, writing a
+> chunk into a second collection silently moved the row out of the first, and
+> the second reported that nothing was written. It was invisible with one
+> collection and found only when two tests indexed the same fixture into
+> throwaway collections of their own.
+
+
 
 The store runs in one of two modes, chosen by `VECTOR_STORE_MODE`:
 
