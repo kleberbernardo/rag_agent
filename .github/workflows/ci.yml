@@ -1,5 +1,10 @@
 name: CI
 
+# The default run title is the commit message, which for a dependency bump is
+# a sentence long and says nothing a list of runs needs. Branch and author fit
+# on one line and answer what a reader is actually scanning for.
+run-name: ${{ github.head_ref || github.ref_name }} · ${{ github.actor }}
+
 on:
   push:
     branches: [main]
@@ -99,8 +104,12 @@ jobs:
       - name: Migrate
         run: alembic upgrade head
 
+      # Serial on purpose. These tests share one database and mutate
+      # collections in it, and on an empty database several workers race to
+      # create the tables langchain-postgres makes on first write. Eighteen
+      # seconds is not worth a flake.
       - name: Tests
-        run: pytest -m integration
+        run: pytest -m integration -n 0
 
   docker:
     name: docker build

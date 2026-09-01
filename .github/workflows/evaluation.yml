@@ -1,5 +1,7 @@
 name: Evaluation
 
+run-name: avaliação · ${{ github.ref_name }} · ${{ github.actor }}
+
 # Manual, plus one scheduled run a week. Never on push: every run reaches the
 # real model, so it costs money and takes minutes, which is the wrong trade for
 # a per-commit check. The fast checks live in ci.yml and cover every push.

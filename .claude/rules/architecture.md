@@ -13,12 +13,17 @@
                                     │
                     ┌───────────────┼───────────────┐
                     ▼               ▼               ▼
+   safety                     guardrails/         ← runs from service.py,
+                        refused in · flagged out     so every interface is covered
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
    domain        prompts/         tools/       observability/
                  Langfuse      search + calc      Langfuse
                                     │
                                     ▼
    data                         indexing/
-                        loader → splitter → vector_store
+                     loader → splitter → vector_store → keyword
                                     │
                                     ▼
                             Postgres + pgvector
@@ -40,12 +45,13 @@ accommodate it, interface logic has probably ended up in the wrong place.
 |---|---|---|
 | `indexing/` | Load, split, embed, search | [indexing.md](indexing.md), [database.md](database.md) |
 | `agent/` | The LangGraph graph and the application service | [agent.md](agent.md) |
+| `guardrails/` | What is refused on the way in, flagged on the way out | [guardrails.md](guardrails.md) |
 | `tools/` | Functions the model may call | [agent.md](agent.md) |
 | `prompts/` | Templates, and fetching them from Langfuse | [observability.md](observability.md) |
 | `evaluation/` | Dataset, metrics, judge, experiments | [evaluation.md](evaluation.md) |
 | `observability/` | Traces, scores, cost, logging | [observability.md](observability.md) |
-| `api/` | HTTP, sessions, authentication | [api.md](api.md) |
-| `cli.py` | Eight Typer commands | See below |
+| `api/` | HTTP, sessions, authentication, rate limiting | [api.md](api.md) |
+| `cli.py` | Nine Typer commands | See below |
 | `config.py` | Every tunable value, validated at boot | See below |
 | `providers.py` | **Every OpenAI import in the project** | [swapping.md](swapping.md) |
 | `types.py` | Dataclasses shared across layers | |
@@ -66,21 +72,22 @@ developer's own environment leaks into the tests.
 
 ## cli.py needs splitting
 
-634 lines, **0% coverage**, the largest file in the project. Eight commands,
-plus table rendering and error handling, all in one module.
+742 lines and nine commands, the largest file in the project by a wide
+margin. It is at 76% coverage now, exercised through Typer's `CliRunner`,
+which runs a terminal command in-process with no subprocess.
 
-The agreed plan: turn it into a `cli/` package with one module per command
-group, and cover it with Typer's `CliRunner`, which exercises a terminal
-command without a subprocess.
+Coverage was the urgent half and it is done. The split is not: the agreed plan
+is a `cli/` package with one module per command group.
 
-**Do not add a new command here before splitting it.**
+**Do not add a new command here before splitting it.** It grew from 634 to 742
+while that sentence was already in this file.
 
 ## Allowed dependencies between packages
 
 ```
-cli      ──▶ agent, indexing, evaluation, prompts, observability
-api      ──▶ agent, indexing, observability
-agent    ──▶ tools, prompts, providers, observability
+cli      ──▶ agent, indexing, evaluation, prompts, guardrails, observability
+api      ──▶ agent, indexing, guardrails, observability
+agent    ──▶ tools, prompts, providers, guardrails, observability
 tools    ──▶ indexing, prompts
 indexing ──▶ providers, config
 evaluation ──▶ agent, observability

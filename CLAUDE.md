@@ -63,13 +63,14 @@ docker compose up -d postgres    # required for anything that touches the store
 | One file | `pytest tests/unit/test_search.py` |
 | One test | `pytest tests/unit/test_search.py::TestPoolWidth::test_the_vector_only_strategy_skips_the_fusion_multiplier` |
 | Coverage | `pytest --cov=rag_agent --cov-report=term-missing` |
-| Lint, format, types | `ruff check src tests`, `ruff format src tests`, `mypy` |
+| Lint, format, types | `ruff check .`, `ruff format .`, `mypy`. **The target is `.`**: CI checks the whole repository |
 
-The full suite takes about 7 minutes. `pytest tests/unit` is the fast loop.
+The suite takes about 40 seconds, on four xdist workers. Not `auto`: each
+worker loads the guardrail models into its own process.
 
-Integration tests carry the `integration` mark and skip themselves unless both
-a real `OPENAI_API_KEY` and a reachable Postgres are present. CI never runs
-them.
+Integration tests carry the `integration` mark and skip themselves without a
+reachable Postgres. They use a fake embedding, so they need no API key, and CI
+runs them in a job of its own, serially.
 
 ### Running the application
 
@@ -152,7 +153,7 @@ Do not present these as solved:
 
 | Gap | Note |
 |---|---|
-| `cli.py` is 634 lines at 0% coverage | Largest file. Split before adding a command |
+| `cli.py` is 742 lines | Covered at 76% now, but still not split. Split before adding a command |
 | No permission-aware retrieval | Anyone who can ask can retrieve any chunk |
 | No CORS, and the rate limit is per process | See [api.md](.claude/rules/api.md) |
 | `OPENAI_API_KEY` is not a GitHub secret | `evaluation.yml` silently skips |

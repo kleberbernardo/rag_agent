@@ -63,14 +63,16 @@ after building rather than quoting that number.
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `ci.yml` | Every push and PR | ruff, ruff format, mypy, pytest, docker build |
+| `ci.yml` | Every push and PR | Three jobs: quality on Ubuntu and Windows, integration against a real Postgres, and a Docker build |
 | `evaluation.yml` | Manual, plus Mondays 06:00 | `rag eval` with score and cost thresholds |
 
 `ci.yml` runs a matrix of ubuntu and windows with `fail-fast: false`, because a
 Windows-only break is exactly what the matrix is for.
 
-**Integration tests never run in CI.** They reach the real embeddings API, and
-a public repository has no business holding an API key.
+**Integration tests do run in CI**, in a job of their own with a
+`pgvector/pgvector:pg17` service. They use a fake deterministic embedding, so
+they need no API key, and they run serially: those tests share one database
+and on an empty one several workers race to create the same tables.
 
 The docker job needs `docker/setup-buildx-action@v3`: the runner's default
 buildx driver cannot export a cache, and `cache-to: type=gha` depends on the

@@ -113,9 +113,25 @@ If you did not measure it, say that you did not.
 
 ## Before finishing a change
 
+**The target is `.`, not a list of folders.** CI runs `ruff check .` and
+`ruff format --check .` over the whole repository, and a Python file outside
+`src` and `tests` (`docs/diagrams/translate.py`, for one) sails past a check
+scoped to those two and breaks the build on three platforms.
+
 ```bash
-ruff format src tests && ruff check src tests && mypy && pytest tests/unit
+ruff format . && ruff check . && mypy && pytest -m "not integration"
 ```
 
-The full suite takes about 7 minutes. `pytest tests/unit` is the fast loop and
-needs no infrastructure.
+That is the same set CI runs, and it takes about 40 seconds. During the work,
+run only the test files that changed.
+
+The integration suite needs a database and runs serially:
+
+```bash
+docker compose up -d postgres
+alembic upgrade head
+pytest -m integration -n 0
+```
+
+Serially because those tests share one database, and on an empty one several
+workers race to create the tables langchain-postgres makes on first write.

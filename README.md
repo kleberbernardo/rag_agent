@@ -3,6 +3,7 @@
 [![CI](https://github.com/kleberbernardo/rag_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/kleberbernardo/rag_agent/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Português](https://img.shields.io/badge/leia_em-português-009c3b.svg)](README.pt-BR.md)
 
 A command-line AI agent that answers questions about your own documents.
 
@@ -66,7 +67,7 @@ there too, which is what covers every interface by construction.
 | **Hybrid search** | `indexing/` | An embedding follows a paraphrase; keyword search finds `Art. 70`. Measured on the same question: rank 31 by embedding, rank 5 by keyword. |
 | **Reciprocal Rank Fusion** | `hybrid.py` | Merges on rank, not score, because a cosine distance and a text search rank are not on the same scale. |
 | **Adaptive chunking** | `splitter.py` | By article, falling back to characters below three headings. Measured: 93% by characters, 97% by article. |
-| **Idempotent ingestion** | `vector_store.py` | The id is `sha256(source + text)`, so re-ingesting overwrites and a queue can redeliver safely. |
+| **Idempotent ingestion** | `vector_store.py` | The id is `sha256(collection + source + text)`, so re-ingesting overwrites and a queue can redeliver safely. |
 | **Two-stage retrieval** | `search()` | Retrieval is judged on recall, reranking on precision. The pool widens only when something will narrow it. |
 | **LLM-as-a-judge** | `evaluation/judge.py` | Structured output against a rubric that is itself a managed prompt. |
 | **Indirect injection scanning** | `guardrails/injection.py` | A retrieved passage is read the way the system prompt is read. Scanned at ingestion, once per chunk. |
@@ -89,7 +90,7 @@ there too, which is what covers every interface by construction.
 | Sessions | Redis, or in process | Only the message history travels |
 | CLI | Typer, Rich | Tested with `CliRunner`, no subprocess |
 | Configuration | Pydantic Settings | Every tunable value, validated at boot |
-| Quality | pytest, pytest-xdist, ruff, mypy | 421 tests, 88% coverage, 46 seconds |
+| Quality | pytest, pytest-xdist, ruff, mypy | Unit tests need nothing running; integration runs against a real Postgres |
 | CI | GitHub Actions | Linux and Windows, plus a weekly evaluation run |
 
 ---
@@ -385,7 +386,7 @@ message rather than failing mid-query.
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
 | `SEARCH_STRATEGY` | `hybrid` | `hybrid` fuses the database's full text search with the embedding; `vector` uses the embedding alone. |
-| `RERANK_STRATEGY` | `none` | `cross_encoder` adds a second pass that reorders what was retrieved. Needs the `rerank` extra. |
+| `RERANK_STRATEGY` | `none` | `cross_encoder` adds a second pass that reorders what was retrieved. |
 | `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | The cross-encoder to load. Multilingual, open source, runs locally. |
 | `RERANK_CANDIDATES` | `24` | How many candidates the reranker reads. Every one is a model pass, so this is the latency knob. |
 | `RATE_LIMIT` | `60/minute` | Ceiling per caller. Empty disables it. |
@@ -393,12 +394,19 @@ message rather than failing mid-query.
 | `API_WORKERS` | `1` | Uvicorn processes. One serialises every request. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
+| `GUARDRAILS_ENABLED` | `true` | One switch for the whole layer. For the suite and for debugging, not for production. |
+| `GUARDRAIL_SCANNER` | `llm_guard` | `none` keeps the arithmetic checks and skips the models. |
+| `INJECTION_MODEL` | `katanemolabs/Arch-Guard` | The injection classifier. Swapping it is configuration. |
+| `SCAN_CORPUS_FOR_INJECTION` | `true` | Scans each chunk at ingestion, against indirect injection. |
+| `MAX_QUESTION_CHARS` | `2000` | Longer than this is a cost attack before it is anything else. |
+| `MAX_ANSWER_TOKENS` | `8000` | Reported, not enforced: the answer already exists. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
 | `LOG_DIR` | `logs/` | Where the log file is written. |
 | `DATABASE_URL` | `postgresql+psycopg://rag:rag@localhost:5432/rag` | Where the index lives. The driver is named because SQLAlchemy defaults to psycopg2. |
 | `DATABASE_POOL_SIZE` | `5` | Connections held open per process. Replicas multiply this. |
 | `DATABASE_MAX_OVERFLOW` | `10` | Extra connections allowed above the pool under load. |
+| `DATABASE_CONNECT_TIMEOUT` | `5` | Seconds before giving up on a connection. Without it the driver waits over two minutes. |
 | `EMBEDDING_DIMENSIONS` | `1536` | Width of the embedding column. Must match the model. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
 | `LANGFUSE_PUBLIC_KEY` | none | Optional. Enables tracing when set together with the secret key. |
@@ -467,9 +475,6 @@ queue, where the same message can be delivered more than once.
 > collection and found only when two tests indexed the same fixture into
 > throwaway collections of their own.
 
-
-
-The store runs in one of two modes, chosen by `VECTOR_STORE_MODE`:
 
 Postgres is the only mode. An embedded file would be one less thing to run,
 and it would also be a second storage engine to keep behaving like the first,
@@ -569,10 +574,11 @@ from `KNOWLEDGE_DOMAIN`.
 
 ### Behaviour
 
-The agent's rules live in `prompts.py`: always retrieve before answering
+The agent's rules live in `prompts/`: always retrieve before answering
 about the documents, answer only from retrieved passages, admit when something
-is missing, always cite the source, and never do arithmetic mentally. Editing
-that file is how you change how the agent behaves.
+is missing, always cite the source, and never do arithmetic mentally. Publishing a new version
+in Langfuse, or editing `templates.py`, is how you change how the agent
+behaves.
 
 ---
 
@@ -632,8 +638,7 @@ everything the article discusses, so one sentence stating a deadline ranks
 below whatever the article is mostly about.
 
 Postgres full text search compares words. It cannot follow a paraphrase, and
-it does not need to
-when the question names the terms the text uses.
+it does not need to when the question names the terms the text uses.
 
 Measured on this corpus, on the question the suite failed for weeks: the
 passage stating the suspension deadline sits at **rank 31 by embedding** and at
@@ -651,9 +656,9 @@ agreed on, which is what either would have found alone; the passages worth
 adding sit deeper in one list. Measured here, the missing deadline reaches the
 top eight at a multiplier of five and not at three.
 
-`SEARCH_STRATEGY=vector` turns the keyword half off. The keyword index is built
-once from what is stored and dropped whenever the store changes, since it is a
-copy.
+`SEARCH_STRATEGY=vector` turns the keyword half off. The keyword half is a GIN
+index on the same rows, so there is no second copy to keep in step and nothing
+to rebuild when the store changes.
 
 **What it fixed:** the last failing case, and with it `correctness` and
 `faithfulness`. Every metric now reads 100% on 29 questions.
@@ -821,8 +826,11 @@ would silently drop the law.
 ### What is not covered
 
 - **Permission-aware retrieval.** Anyone who can ask can retrieve any chunk.
-- **Output PII.** Only the question is scanned.
-- **Rate limiting.** No per-caller cost ceiling yet.
+  This is the largest hole left, and it is the one a regulated institution
+  asks about first.
+- **Output PII.** Only the question is scanned, never the answer.
+- **Adversarial evaluation.** The injection classifier was measured on eight
+  hand-written cases, not against a red team suite.
 
 ---
 
@@ -846,7 +854,8 @@ Interactive documentation, generated from the schemas, at `/docs`.
 | `POST` | `/chat` | A question inside a conversation |
 | `DELETE` | `/chat/{session_id}` | Forget a conversation |
 | `POST` | `/feedback` | Record what someone thought of an answer |
-| `GET` | `/health` | Liveness plus the indexed chunk count |
+| `GET` | `/health` | Liveness. Checks nothing else |
+| `GET` | `/ready` | Readiness. Database reachable, index populated |
 | `GET` | `/status` | The active configuration |
 
 ```bash
@@ -1049,22 +1058,23 @@ In Compose a one-shot `migrate` service runs first and the API waits on
 
 ## Running with Docker
 
-Three services: the agent, Postgres with pgvector, and Redis for sessions.
-The index lives in its own container, with its own volume, and survives the
-application entirely.
+Four services: the agent, Postgres with pgvector, Redis for sessions, and a
+one-shot `migrate` that prepares the schema and exits. The index lives in its
+own container, with its own volume, and survives the application entirely.
 
 ```bash
 export OPENAI_API_KEY=sk-...        # Windows: $env:OPENAI_API_KEY='sk-...'
 
-docker compose up -d                     # Postgres and Redis, then the API
+docker compose up -d                     # Postgres, Redis, migrate, then the API
 docker compose run --rm api ingest       # build the index
 curl localhost:8080/health
 ```
 
-`docker compose up` brings up all three. The API waits for Postgres to accept
-connections before starting, and has a healthcheck of its own hitting
-`/health`. The extensions and the text search configuration are created by the
-application on first use, so a fresh database needs no setup step.
+`docker compose up` brings up all four, in order. The API waits for Postgres
+to accept connections **and** for `migrate` to finish successfully, so it never
+starts against a schema that is not there. Its own healthcheck hits `/ready`,
+because Compose's `service_healthy` means "ready for traffic" rather than
+"the process is alive".
 
 The image serves the API by default and still runs the CLI on demand, because
 the entrypoint is the `rag` command itself:
@@ -1089,11 +1099,17 @@ tear everything down including the index:
 docker compose down -v
 ```
 
-**On image size:** the runtime image is ~422 MB, down from ~618 MB when the
-store was Chroma. The saving is not an optimisation, it is a consequence:
-`chromadb` pulled in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust
-bindings (57 MB), all of it machinery for running Chroma as a server, which
-this container never did. A Postgres client is a driver.
+**On image size:** the runtime image is ~1.9 GB, and almost all of it is
+torch, which arrives with the guardrails. It would be ~5.9 GB without one line
+in the Dockerfile: the wheel PyPI serves on Linux bundles the CUDA runtime,
+roughly three gigabytes of nvidia libraries for a container with no GPU.
+Installing torch from PyTorch's CPU index first is what avoids that.
+
+For comparison, it was 422 MB before the guardrails and 618 MB before that,
+when the store was Chroma. Dropping Chroma was not an optimisation but a
+consequence: `chromadb` pulled in `kubernetes`, `onnxruntime` and Rust
+bindings, all of it machinery for running Chroma as a server, which this
+container never did. A Postgres client is a driver.
 
 ---
 ## Evaluation
@@ -1138,8 +1154,9 @@ relatório salvo em evals/results/20260830-202941.json
 `recusa` reads `n/a` here because none of the first five cases is an
 out-of-corpus one: zero of zero applicable is not the same as failing.
 
-The whole suite, all 29 cases, currently scores **97%**, with the single
-failure described below.
+The whole suite, all 29 cases, currently scores **100%**. Five of the six
+metrics are deterministic, so that number is reproducible; `faithfulness` is
+graded by a model and drifts, so one run at 100% is not a promise of the next.
 
 Failures print with the answer, the documents retrieved and which metric broke,
 and the command exits non-zero when the overall score falls below
@@ -1148,12 +1165,12 @@ and the command exits non-zero when the overall score falls below
 Each run writes a timestamped report to `evals/results/`, and those are kept
 in the repository. Every one records the model, the embedding model and
 `retrieval_k` alongside the score, because a number without the configuration
-behind it cannot be compared to the next run. The history shows the effect of a change: the reports here trace 82% to 86% to 93% to 97%, each step
-a single setting.
+behind it cannot be compared to the next run. The history shows the effect of a change: the reports here trace 82% to 86%
+to 93% to 97% to 100%, each step a single setting.
 
 ### Groundedness
 
-The other three metrics compare the answer against the dataset. This one
+The reference-based metrics compare the answer against the dataset. This one
 compares it against **what the agent actually read**.
 
 Every number the answer states has to appear in a retrieved passage, in a tool
@@ -1322,7 +1339,7 @@ rag dataset push          # send the questions to Langfuse
 rag eval                  # run them there
 ```
 
-Every case gets its own trace, the five metrics hang off it as scores, and two
+Every case gets its own trace, the six metrics hang off it as scores, and two
 runs sit side by side in a UI built for that comparison. The run carries the
 configuration as metadata, so a score is never separated from the settings that
 produced it.
@@ -1365,9 +1382,10 @@ Every fact was extracted from the indexed PDFs, not written from memory.
 
 ### Every metric is deterministic
 
-No second model grades the answers. A language model used as a judge drifts
-between runs, and a suite you cannot trust has no value. The four metrics
-are string and set operations: same answer, same score, no extra cost.
+Five of the six are string and set operations: same answer, same score, no
+extra cost. A language model used as a judge drifts between runs, and a suite
+whose numbers move on their own cannot tell a regression from noise, which is
+why `faithfulness` is the sixth and is kept separate.
 
 The trade-off is honest: `retrieval` checks that the right *document* came
 back, not the right *passage*. In a 143-page regulation full of near-identical
@@ -1386,6 +1404,8 @@ Running it for the first time paid for itself immediately:
 | A question so ambiguous the agent was graded wrong for a correct answer, since the article carries five different deadlines for "exigências" | Split into two specific questions | The dataset got honest |
 | Rules separated from the exceptions that qualify them, because chunking cut every 1000 characters | `CHUNK_STRATEGY=articles` | 93% → 97% |
 | Nothing checked whether an answer's numbers came from the documents or from the model's memory | Groundedness | 100%, so far a regression guard rather than a finding |
+| One case failed for weeks. The passage stating the deadline sat at rank 31 of 590 by embedding, so no reranker could have reached it | Hybrid search, fused by RRF | 97% → 100% |
+| The same chunk could not exist in two collections: writing it into the second moved the row out of the first, silently | The collection is part of the chunk id | Found by an integration test, not by a user |
 
 The first is the dangerous one: a wrong number with a correct citation looks
 more trustworthy than a wrong number alone.
@@ -1470,13 +1490,14 @@ one. Neither touches the repository.
 
 ### What is published, and what is not
 
-Three prompts go to Langfuse:
+Four prompts go to Langfuse:
 
 | Prompt | What the model does with it |
 |---|---|
 | `rag-agent-system` | The rules it answers under |
 | `rag-agent-search-tool` | Decides whether a question needs retrieval |
 | `rag-agent-calculator-tool` | Decides whether a question needs arithmetic |
+| `rag-agent-judge` | The rubric the `faithfulness` metric grades against |
 
 The line is what the text is for. A **description the model reads to decide**
 is tuned the way a prompt is tuned, so it belongs where prompts are versioned.
@@ -1500,7 +1521,7 @@ time is the whole point.
 
 ### It never blocks an answer
 
-Without Langfuse configured, the templates in `prompts.py` are used and
+Without Langfuse configured, the templates in `prompts/templates.py` are used and
 everything works. With Langfuse configured but unreachable, the same templates
 are used and a warning is logged. A prompt store that can stop the agent from
 answering is worse than no prompt store.
@@ -1574,20 +1595,29 @@ src/rag_agent/
 │   ├── pricing.py         token prices, dated
 │   └── logging_setup.py   console and file
 │
-├── indexing/          loader · splitter · vector_store · hybrid
+├── guardrails/        what is refused on the way in, flagged on the way out
+│   ├── checks.py          the decision: what blocks, what only records
+│   ├── scanners.py        LLM Guard, narrowed and given CPF and CNPJ
+│   └── injection.py       the classifier, on questions and on the corpus
+│
+├── indexing/          loader · splitter · database · vector_store · keyword · hybrid · reranker
 ├── tools/             one module per tool, registered in build_tools()
 ├── agent/             service (build + orchestration) · trace
-├── api/               routes · schemas · sessions · security · feedback
+├── api/               routes · schemas · sessions · security · limits · feedback
 └── evaluation/        dataset · metrics · runner · comparison · configuration
+
+migrations/            Alembic. The application checks the schema, never applies it
+docs/diagrams/         the architecture diagram, as source
 ```
 
-Four loose modules and seven packages. The four are the ones every layer
+Four loose modules and eight packages. The four are the ones every layer
 reaches for and none of them owns: settings, domain types, the provider
 boundary, and the terminal.
 
-Only three directories, and each earns it: `indexing/` grows with every new
-file format, `tools/` with every new tool, `agent/` holds the orchestration.
-Everything else is a single module.
+A package exists where a thing grows: `indexing/` with every new file format,
+`tools/` with every new tool, `guardrails/` with every new class of thing to
+refuse. `cli.py` is the exception and the acknowledged debt: 742 lines that
+should be a package before another command is added.
 
 | To change... | Edit |
 |---|---|
@@ -1598,6 +1628,8 @@ Everything else is a single module.
 | The model provider | `providers.py` |
 | Token prices | `observability/pricing.py` |
 | Add an endpoint | `api/routes.py` |
+| What is refused | `guardrails/` |
+| The schema | `migrations/`, then `alembic upgrade head` |
 
 Interfaces stay thin because orchestration lives in `agent/service.py`. Adding
 an HTTP API or a bot means wrapping that service, not rewriting it.
@@ -1618,14 +1650,20 @@ ruff check . && ruff format .   # lint and format
 mypy                            # type check
 ```
 
-Every push runs the same four checks on Ubuntu and Windows through GitHub
-Actions (`.github/workflows/ci.yml`). Integration tests are excluded there: a
-public repository has no business holding an API key, and every push would
-spend tokens.
+Every push runs three jobs through GitHub Actions
+(`.github/workflows/ci.yml`): the quality checks on Ubuntu and Windows, the
+integration suite against a real Postgres, and a Docker build.
 
-Unit tests cover the pure logic (chunking, the calculator, settings, the
-service loop with a fake model) and need no API key. Tests marked
-`integration` hit the real embedding API and are skipped without one.
+Unit tests cover the pure logic and need nothing running. The integration
+suite exercises the SQL against a `pgvector` service, with a fake
+deterministic embedding so it needs no API key: SQL is the one thing a mock
+cannot check, and a `DELETE` with a wrong `WHERE` passes every unit test and
+empties the index in production. It runs serially, because those tests share
+one database.
+
+`pytest` runs four workers by default. Not `auto`: each worker loads the
+guardrail models into its own process, and past four the memory pressure costs
+more than the parallelism buys.
 
 ---
 ## Troubleshooting

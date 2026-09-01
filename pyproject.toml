@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rag-agent"
 version = "0.1.0"
-description = "Agentic RAG over your own documents: LangChain, LangGraph, Postgres with pgvector and tool calling."
+description = "Agentic RAG in Python: LangChain, LangGraph and Postgres with pgvector. Hybrid retrieval fused by RRF, guardrails, and six graded metrics."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
