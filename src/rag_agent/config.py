@@ -19,6 +19,13 @@ class SearchStrategy(StrEnum):
     HYBRID = "hybrid"
 
 
+class RerankStrategy(StrEnum):
+    """Whether a second pass reorders what the search retrieved."""
+
+    NONE = "none"
+    CROSS_ENCODER = "cross_encoder"
+
+
 class ChunkStrategy(StrEnum):
     """How documents are cut into chunks."""
 
@@ -95,6 +102,31 @@ class Settings(BaseSettings):
     # search does not have that problem, and cannot follow a paraphrase,
     # which is why both run.
     search_strategy: SearchStrategy = Field(default=SearchStrategy.HYBRID)
+
+    # A reranker reads the question and the passage together, in one pass,
+    # and scores how well one answers the other. The embedding cannot: the
+    # passage was embedded before the question existed. That is why it is more
+    # accurate, and why it costs a model pass per passage rather than a
+    # lookup.
+    #
+    # It is off by default because it fixes precision, not recall, and recall
+    # is what was wrong here. Measured on this corpus, the passage the suite
+    # kept missing sat at rank 31 of 590 by embedding: a reranker would have
+    # reordered eight passages that did not contain the answer. Hybrid search
+    # fixed it instead. Turn this on when the retrieved pool is wide enough
+    # that the answer is in it but not near the top.
+    rerank_strategy: RerankStrategy = Field(default=RerankStrategy.NONE)
+
+    # Multilingual, open source, and runs locally, which is what keeps the
+    # corpus from being sent to a third party. Weights are downloaded on first
+    # use.
+    rerank_model: str = Field(default="BAAI/bge-reranker-v2-m3")
+
+    # How many fused candidates the reranker reads. This is the whole point of
+    # the second pass: retrieve wide enough that the answer is somewhere in
+    # the pool, then let a model that reads both sides pick the few that go to
+    # the agent. Every candidate is a model pass, so this is the latency knob.
+    rerank_candidates: int = Field(default=24, gt=0, le=200)
 
     max_searches_per_turn: int = Field(default=3, gt=0, le=10)
 

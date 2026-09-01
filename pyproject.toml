@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# A cross-encoder runs locally, which means torch. That is roughly 2 GB of
+# wheels for a second pass that is off by default, so it stays out of the
+# runtime image until someone turns reranking on.
+rerank = [
+    "sentence-transformers>=3.0,<7",
+]
 dev = [
     "pytest>=8.0",
     "httpx>=0.28",

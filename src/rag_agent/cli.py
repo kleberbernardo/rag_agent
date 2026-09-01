@@ -43,6 +43,7 @@ from rag_agent.indexing import (
     describe_location,
     index_documents,
     load_documents,
+    reranking_enabled,
     reset_index,
     split_documents,
 )
@@ -329,6 +330,14 @@ def status() -> None:
     console.print(f"[bold]documentos  [/] {settings.data_dir}")
     console.print(f"[bold]índice      [/] postgres · {describe_location()}")
     console.print(f"[bold]busca       [/] {settings.search_strategy.value}")
+    console.print(
+        f"[bold]rerank      [/] {settings.rerank_strategy.value}"
+        + (
+            f" · {settings.rerank_model} · {settings.rerank_candidates} candidatos"
+            if reranking_enabled()
+            else ""
+        )
+    )
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
 
 

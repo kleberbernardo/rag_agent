@@ -132,6 +132,7 @@ Ten steps on the graph is the second cap, and the safety net behind the first.
 | Orchestration | LangChain, LangGraph through `create_agent` |
 | Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small` |
 | Vector store | Postgres 17 with pgvector, and its full text search |
+| Reranking | Optional cross-encoder, `BAAI/bge-reranker-v2-m3` |
 | HTTP | FastAPI, Uvicorn |
 | CLI | Typer, Rich |
 | Configuration | Pydantic Settings |
@@ -453,6 +454,9 @@ message rather than failing mid-query.
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
 | `SEARCH_STRATEGY` | `hybrid` | `hybrid` fuses the database's full text search with the embedding; `vector` uses the embedding alone. |
+| `RERANK_STRATEGY` | `none` | `cross_encoder` adds a second pass that reorders what was retrieved. Needs the `rerank` extra. |
+| `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | The cross-encoder to load. Multilingual, open source, runs locally. |
+| `RERANK_CANDIDATES` | `24` | How many candidates the reranker reads. Every one is a model pass, so this is the latency knob. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
@@ -571,6 +575,19 @@ The question is embedded by the **same model** used during ingestion, and the
 store returns the nearest chunks. This is why "what does the cheapest tier
 cost" finds the right passage even when neither "cheapest" nor "tier" appears
 in the text. Matching happens on meaning, not on words.
+
+A search is two stages, and only the first always runs:
+
+```
+question ──▶ retrieval ──▶ candidates ──▶ [reranking] ──▶ passages
+             wide, cheap                   narrow, off by default
+```
+
+Retrieval decides what is in the pool and is judged on whether the answer is
+there at all. Reranking decides what comes out of it and is judged on whether
+the best of them is on top. With no reranker the pool is the answer, so it is
+retrieved at exactly the width asked for. See
+[Reranking](#reranking) for why the second stage is off here.
 
 > Change `EMBEDDING_MODEL` and you must run `rag ingest --reset`, and set
 > `EMBEDDING_DIMENSIONS` to match. Vectors from different models are neither
@@ -1233,6 +1250,95 @@ copy.
 so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
 and drifts; one run at 100% is not a guarantee of the next.
 
+### Reranking
+
+Off by default. This section is as much about why as about how.
+
+**What a reranker is.** A second pass that reorders the passages the search
+already retrieved. It finds nothing of its own.
+
+```
+retrieval  ──▶  24 candidates  ──▶  reranker  ──▶  8 passages  ──▶  agent
+   wide, cheap                       narrow, expensive
+```
+
+**Why it is more accurate.** Every retriever above compares two things through
+something precomputed. A passage is embedded at ingestion, months before the
+question exists, so its vector compresses the text without knowing what will
+be asked of it. A cross-encoder reads the question and the passage together,
+in one forward pass, and answers directly: does this passage answer that one.
+
+That is also why it is expensive. Nothing can be precomputed, so the cost is
+one model pass per candidate, on every question.
+
+| | Embedding | Cross-encoder |
+|---|---|---|
+| Reads the pair together | No | Yes |
+| Computed when | At ingestion | At query time |
+| Cost | A lookup | A forward pass per candidate |
+| Scales to | Millions of passages | Dozens |
+
+**Why it is off here.** A reranker fixes precision. It cannot repair a pool
+the answer is not in. The failure this suite had for weeks was recall:
+measured on this corpus, the passage stating the suspension deadline sat at
+rank 31 of 590 by embedding. With `RETRIEVAL_K=8` a reranker would have been
+handed eight passages that did not contain the answer, and would have returned
+eight passages that still did not. Hybrid search is what fixed it.
+
+Turning it on would add latency and a two gigabyte dependency for a measured
+gain of nothing, on a corpus where every metric already reads 100%.
+
+**What it looks like when it works.** Measured with the default model on five
+real passages from this corpus, with the answer deliberately placed last, as
+it would arrive from a wide pool:
+
+| After reranking | Was | Score | Passage |
+|---|---|---|---|
+| 1 | 5 | `+0.9723` | `§ 2º O prazo de suspensão da oferta não pode ser superior a 30 dias.` |
+| 2 | 2 | `+0.2308` | `Art. 70. A SRE pode suspender ou cancelar, a qualquer tempo…` |
+| 3 | 1 | `+0.0050` | `Art. 12. O lote suplementar não pode ultrapassar 15%…` |
+| 4 | 3 | `+0.0004` | `Art. 25. O prospecto deverá ser elaborado…` |
+| 5 | 4 | `+0.0001` | `Art. 3. Consideram-se atos de distribuição pública…` |
+
+The gap between the first two is the useful part. The passage that merely
+mentions suspension scores 0.23; the one that states the deadline scores 0.97.
+An embedding cannot separate those, because both are about suspending an
+offer.
+
+**When to turn it on.** When the pool is wide enough that the answer is in it
+but not near the top. That is the normal condition at scale, and it is why the
+two-stage shape exists at all: with millions of passages you must retrieve
+a hundred or more to be confident of recall, and a hundred passages do not fit
+in a prompt. The reranker is the funnel between those two facts.
+
+```bash
+pip install -e ".[rerank]"
+RERANK_STRATEGY=cross_encoder rag ask "qual o prazo de suspensão?"
+```
+
+> **On Windows**, that install fails with `OSError: [Errno 2] No such file or
+> directory` on a torch header, if long path support is off. torch ships
+> headers whose paths exceed 260 characters. Enable it once, as administrator:
+> `Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+> -Name LongPathsEnabled -Value 1`, then reopen the terminal. Nothing else in
+> this project needs it.
+
+The pool widens on its own when it is enabled: `RERANK_CANDIDATES` replaces
+`RETRIEVAL_K` as the retrieval width, because a reranker handed exactly what
+it returns has nothing to choose between.
+
+**On the dependency.** A local cross-encoder means torch, roughly two
+gigabytes of wheels. That is why it is an extra rather than a dependency: the
+runtime image stays at 422 MB until someone opts in. At scale the answer is
+neither of those, it is a reranking service of its own, so the model is loaded
+once behind an endpoint instead of once per API replica. The interface here is
+one method, so that is a class, not a rewrite.
+
+**On sending text to an API.** Cohere Rerank is the commercial standard and is
+very good. It also means the corpus leaves the network. For a regulated
+institution that is usually the end of the discussion, which is why the local
+model is the default choice here.
+
 ### The six metrics
 
 | Metric | Needs the expected answer? | What it checks |
@@ -1389,6 +1495,9 @@ service loop with a fake model) and need no API key. Tests marked
 | Nonsense answers after changing models | Run `rag ingest --reset` |
 | Answers missing detail | Raise `RETRIEVAL_K` or `CHUNK_SIZE` |
 | Broken accents on Windows | `set PYTHONIOENCODING=utf-8` |
+| `pip install -e ".[rerank]"` fails on a torch header | Enable long path support on Windows, see [Reranking](#reranking) |
+| `RerankerUnavailableError` | Install the extra, or set `RERANK_STRATEGY=none` |
+| Postgres unreachable | `docker compose up -d postgres`, or check `DATABASE_URL` |
 
 ---
 

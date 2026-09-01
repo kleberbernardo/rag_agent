@@ -28,6 +28,7 @@ from rag_agent.indexing.database import (
 )
 from rag_agent.indexing.hybrid import FUSION_POOL, fuse, identity
 from rag_agent.indexing.keyword import keyword_search
+from rag_agent.indexing.reranker import RerankerUnavailableError, get_reranker, reranking_enabled
 from rag_agent.providers import build_embeddings
 from rag_agent.types import SearchHit
 
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DatabaseUnavailableError",
+    "RerankerUnavailableError",
     "count_documents",
     "describe_location",
     "get_vector_store",
@@ -99,41 +101,69 @@ def index_documents(chunks: list[Document]) -> int:
 def search(query: str, k: int | None = None) -> list[SearchHit]:
     """Return the k chunks most relevant to the query.
 
-    In `vector` mode this is nearest-neighbour on the embedding, and the hits
-    carry their distance. In `hybrid` mode a keyword ranking is fused with it,
-    and the distance is no longer meaningful for the fused list: two rankings
-    are merged by position, not by score, because a cosine distance and a text
-    search rank are not on the same scale.
+    Retrieval and reranking answer different questions. Retrieval decides what
+    is in the pool and is judged on whether the answer is there at all.
+    Reranking decides what comes out of it and is judged on whether the best
+    of them is on top. With no reranker the pool is the answer, so it is
+    retrieved at exactly the width the caller asked for.
+
+    In `vector` mode the ranking is nearest-neighbour on the embedding, and
+    the hits carry their distance. In `hybrid` mode a keyword ranking is fused
+    with it, and the distance stops being meaningful for the fused list: two
+    rankings are merged by position, not by score, because a cosine distance
+    and a text search rank are not on the same scale.
     """
     settings = get_settings()
     limit = settings.retrieval_k if k is None else k
 
+    # A reranker only earns its latency when it is handed more than it
+    # returns. Without one, retrieving wider would be work thrown away.
+    wanted = max(settings.rerank_candidates, limit) if reranking_enabled() else limit
+
+    candidates, distances = _retrieve(query, wanted)
+
+    return [
+        SearchHit(document=document, distance=distances.get(identity(document), _worst(distances)))
+        for document in get_reranker().rerank(query, candidates, limit)
+    ]
+
+
+def _retrieve(query: str, wanted: int) -> tuple[list[Document], dict[str, float]]:
+    """The candidate pool, and whatever distances are known about it."""
+    settings = get_settings()
+
     if settings.search_strategy is SearchStrategy.VECTOR:
-        scored = get_vector_store().similarity_search_with_score(query, k=limit)
-        return [SearchHit(document=document, distance=distance) for document, distance in scored]
+        scored = get_vector_store().similarity_search_with_score(query, k=wanted)
+        return [document for document, _ in scored], _distances(scored)
 
-    pool = limit * FUSION_POOL
+    # Each retriever is asked for several times what the fusion returns. Two
+    # short lists only agree on what either would have found alone; the
+    # passages worth adding sit deeper in one of them.
+    pool = wanted * FUSION_POOL
     scored = get_vector_store().similarity_search_with_score(query, k=pool)
-
-    by_keyword = keyword_search(query, pool)
-    if not by_keyword:
-        return [
-            SearchHit(document=document, distance=distance) for document, distance in scored[:limit]
-        ]
+    distances = _distances(scored)
 
     by_vector = [document for document, _ in scored]
-    distances = {identity(document): distance for document, distance in scored}
+    by_keyword = keyword_search(query, pool)
 
-    fused = fuse([by_vector, by_keyword], limit=limit)
+    if not by_keyword:
+        return by_vector[:wanted], distances
 
-    # A document the keyword search contributed has no distance of its own.
-    # Reporting the worst seen keeps the field honest rather than inventing a
-    # number that would read as a similarity.
-    fallback = max(distances.values(), default=0.0)
-    return [
-        SearchHit(document=document, distance=distances.get(identity(document), fallback))
-        for document in fused
-    ]
+    return fuse([by_vector, by_keyword], limit=wanted), distances
+
+
+def _distances(scored: list[tuple[Document, float]]) -> dict[str, float]:
+    return {identity(document): distance for document, distance in scored}
+
+
+def _worst(distances: dict[str, float]) -> float:
+    """What to report for a hit the vector search never saw.
+
+    A document the keyword search contributed has no distance of its own.
+    Reporting the worst seen keeps the field honest rather than inventing a
+    number that would read as a similarity.
+    """
+    return max(distances.values(), default=0.0)
 
 
 def count_documents() -> int:

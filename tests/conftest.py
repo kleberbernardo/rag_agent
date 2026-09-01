@@ -38,6 +38,9 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "ARTICLE_MAX_CHARS",
         "RETRIEVAL_K",
         "SEARCH_STRATEGY",
+        "RERANK_STRATEGY",
+        "RERANK_MODEL",
+        "RERANK_CANDIDATES",
         "MAX_SEARCHES_PER_TURN",
         "DATA_DIR",
         "COLLECTION_NAME",
@@ -63,8 +66,22 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         monkeypatch.delenv(variable, raising=False)
 
     get_settings.cache_clear()
+    _forget_caches()
     yield
     get_settings.cache_clear()
+    _forget_caches()
+
+
+def _forget_caches() -> None:
+    """Drop what is built from the settings and would outlive them.
+
+    The reranker is held for the life of the process because loading a model
+    is measured in seconds. That is right in production and wrong in a suite,
+    where the first test to build one would decide for every test after it.
+    """
+    from rag_agent.indexing.reranker import forget_reranker
+
+    forget_reranker()
 
 
 @pytest.fixture
