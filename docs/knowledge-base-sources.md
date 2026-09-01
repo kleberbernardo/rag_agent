@@ -27,4 +27,4 @@ Nothing in the code depends on these documents. To point the agent at your own:
    `.pdf`).
 2. Set `KNOWLEDGE_DOMAIN` in `.env` to describe the new subject, in the
    language you want the answers in.
-3. Delete `.chroma/` and run `rag ingest`.
+3. Run `rag ingest --reset`.

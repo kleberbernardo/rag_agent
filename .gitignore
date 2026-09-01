@@ -8,7 +8,6 @@ env/
 .env.local
 
 # Banco vetorial (regenerável com `rag ingest`)
-.chroma/
 
 # Logs
 logs/*

@@ -60,7 +60,9 @@ def indexed(monkeypatch: pytest.MonkeyPatch) -> None:
     from rag_agent.api import routes
 
     monkeypatch.setattr(routes, "count_documents", lambda: 590)
-    monkeypatch.setattr(routes, "describe_location", lambda: "/app/.chroma")
+    monkeypatch.setattr(
+        routes, "describe_location", lambda: "postgresql+psycopg://rag:***@db:5432/rag"
+    )
     monkeypatch.setattr(routes, "ask", lambda question: build_result())
     monkeypatch.setattr(routes, "flush", lambda: None)
 
@@ -70,7 +72,9 @@ def empty_index(monkeypatch: pytest.MonkeyPatch) -> None:
     from rag_agent.api import routes
 
     monkeypatch.setattr(routes, "count_documents", lambda: 0)
-    monkeypatch.setattr(routes, "describe_location", lambda: "/app/.chroma")
+    monkeypatch.setattr(
+        routes, "describe_location", lambda: "postgresql+psycopg://rag:***@db:5432/rag"
+    )
 
 
 @pytest.fixture
@@ -101,11 +105,11 @@ class TestHealth:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from rag_agent.api import routes
-        from rag_agent.indexing import VectorStoreUnavailableError
+        from rag_agent.indexing import DatabaseUnavailableError
 
         def unreachable() -> int:
-            msg = "Não foi possível conectar ao Chroma em chroma:8000."
-            raise VectorStoreUnavailableError(msg)
+            msg = "Não foi possível conectar ao Postgres em db:5432."
+            raise DatabaseUnavailableError(msg)
 
         monkeypatch.setattr(routes, "count_documents", unreachable)
 
@@ -113,7 +117,7 @@ class TestHealth:
             response = broken.get("/health")
 
         assert response.status_code == 503
-        assert "chroma:8000" in response.json()["detail"]
+        assert "db:5432" in response.json()["detail"]
 
 
 class TestStatus:

@@ -1,23 +1,29 @@
-"""Vector store round trip. Requires a real OPENAI_API_KEY: embeddings are remote."""
+"""Vector store round trip.
+
+Needs both a real OPENAI_API_KEY, since embeddings are remote, and a running
+Postgres, since the store no longer has an embedded mode.
+"""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 from langchain_core.documents import Document
+
+from tests.conftest import requires_postgres
 
 _API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not _API_KEY, reason="needs a real OPENAI_API_KEY"),
+    requires_postgres,
 ]
 
 
 @pytest.fixture
-def indexed_store(temporary_index: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def indexed_store(temporary_index: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", _API_KEY)
 
     from rag_agent.indexing import index_documents

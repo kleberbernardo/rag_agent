@@ -1,6 +1,5 @@
 .venv/
 venv/
-.chroma/
 logs/
 .git/
 .github/

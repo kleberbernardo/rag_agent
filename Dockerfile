@@ -26,7 +26,6 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONIOENCODING=utf-8 \
     DATA_DIR=/app/data \
-    VECTOR_STORE_DIR=/app/.chroma \
     LOG_DIR=/app/logs
 
 # Installed non-editable, the package cannot find the project root by walking
@@ -38,7 +37,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY --chown=rag:rag data/ ./data/
-RUN mkdir -p /app/.chroma /app/logs && chown -R rag:rag /app
+RUN mkdir -p /app/logs && chown -R rag:rag /app
 
 USER rag
 

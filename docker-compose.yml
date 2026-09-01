@@ -1,26 +1,27 @@
 services:
-  # Standalone vector store. Running it as its own service is the point of
-  # VECTOR_STORE_MODE=server: the index survives, restarts and scales
-  # independently of the application container.
-  chroma:
-    image: chromadb/chroma:1.5.9
-    container_name: rag-chroma
+  # Postgres with pgvector. It holds the embeddings and answers keyword search
+  # over the same rows, so a chunk and its metadata are written in one
+  # transaction and cannot drift apart. The image is the official Postgres one
+  # with the extension already compiled in; `unaccent` and the text search
+  # configuration are created by the application on startup, since they are
+  # idempotent and nobody has to remember a setup step.
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: rag-postgres
     ports:
-      - "8000:8000"
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
     volumes:
-      - chroma-data:/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      # The image ships neither curl nor wget, so the probe is bash opening a
-      # socket. It asks the real endpoint rather than only checking the port,
-      # because an open port does not mean the API is answering yet.
-      test:
-        - CMD
-        - bash
-        - -c
-        - >-
-          exec 3<>/dev/tcp/localhost/8000 &&
-          printf 'GET /api/v2/heartbeat HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
-          grep -q nanosecond <&3
+      # pg_isready answers as soon as the server accepts connections, which is
+      # later than the port opening: the entrypoint starts Postgres once to run
+      # the init scripts and restarts it, so an open port is not yet the real
+      # server.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -50,18 +51,16 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      chroma:
-        # Without service_healthy the CLI would start before Chroma answers
-        # and fail on the first command.
+      postgres:
+        # Without service_healthy the application would start before Postgres
+        # accepts connections and fail on the first command.
         condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?defina OPENAI_API_KEY no ambiente ou num arquivo .env}
       KNOWLEDGE_DOMAIN: ${KNOWLEDGE_DOMAIN:-regulação do mercado de capitais brasileiro (resoluções da CVM)}
-      VECTOR_STORE_MODE: server
-      CHROMA_HOST: chroma
-      CHROMA_PORT: "8000"
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}
       SESSION_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       # Optional. Set it and every request needs the X-API-Key header.
@@ -76,5 +75,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  chroma-data:
+  postgres-data:
   redis-data:

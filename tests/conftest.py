@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -38,12 +40,12 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "SEARCH_STRATEGY",
         "MAX_SEARCHES_PER_TURN",
         "DATA_DIR",
-        "VECTOR_STORE_DIR",
         "COLLECTION_NAME",
+        "DATABASE_URL",
+        "DATABASE_POOL_SIZE",
+        "DATABASE_MAX_OVERFLOW",
+        "EMBEDDING_DIMENSIONS",
         "KNOWLEDGE_DOMAIN",
-        "VECTOR_STORE_MODE",
-        "CHROMA_HOST",
-        "CHROMA_PORT",
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_HOST",
@@ -85,10 +87,54 @@ def knowledge_base(tmp_path: Path) -> Path:
     return root
 
 
+def postgres_is_up() -> bool:
+    """Whether the test database is reachable.
+
+    The store no longer has an embedded mode, so anything that touches it
+    needs a running Postgres. Tests that do are skipped rather than failed
+    when there is none, which keeps the unit suite runnable with no
+    infrastructure at all.
+    """
+    from sqlalchemy import create_engine, text
+
+    from rag_agent.config import Settings
+
+    try:
+        engine = create_engine(Settings().database_url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        engine.dispose()
+    except Exception:
+        return False
+    return True
+
+
+requires_postgres = pytest.mark.skipif(
+    not postgres_is_up(),
+    reason="needs a running Postgres (docker compose up -d postgres)",
+)
+
+
 @pytest.fixture
-def temporary_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Point the vector store at a throwaway directory."""
-    index_dir = tmp_path / "chroma"
-    monkeypatch.setenv("VECTOR_STORE_DIR", str(index_dir))
-    monkeypatch.setenv("COLLECTION_NAME", "test_collection")
-    yield index_dir
+def temporary_index(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """Point the vector store at a throwaway collection.
+
+    A collection per test rather than a database per test: the rows are
+    scoped by collection anyway, and creating one costs a single insert
+    against a database that is already up.
+    """
+    from rag_agent.config import get_settings
+    from rag_agent.indexing import forget_engine
+
+    name = f"test_{uuid4().hex}"
+    monkeypatch.setenv("COLLECTION_NAME", name)
+    get_settings.cache_clear()
+    forget_engine()
+
+    yield name
+
+    from rag_agent.indexing import reset_index
+
+    with suppress(Exception):
+        reset_index()
+    forget_engine()

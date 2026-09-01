@@ -38,7 +38,7 @@ from rag_agent.evaluation import (
     sync_dataset,
 )
 from rag_agent.indexing import (
-    VectorStoreUnavailableError,
+    DatabaseUnavailableError,
     count_documents,
     describe_location,
     index_documents,
@@ -327,9 +327,8 @@ def status() -> None:
     )
     console.print(f"[bold]domínio     [/] {settings.knowledge_domain}")
     console.print(f"[bold]documentos  [/] {settings.data_dir}")
-    console.print(
-        f"[bold]índice      [/] {settings.vector_store_mode.value} · {describe_location()}"
-    )
+    console.print(f"[bold]índice      [/] postgres · {describe_location()}")
+    console.print(f"[bold]busca       [/] {settings.search_strategy.value}")
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
 
 
@@ -576,7 +575,7 @@ def _count_or_exit() -> int:
     """Count indexed chunks, turning an unreachable server into a clean exit."""
     try:
         return count_documents()
-    except VectorStoreUnavailableError as error:
+    except DatabaseUnavailableError as error:
         console.print(f"[red]{error}")
         raise typer.Exit(code=1) from error
 

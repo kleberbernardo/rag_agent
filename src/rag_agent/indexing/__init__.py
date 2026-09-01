@@ -1,10 +1,19 @@
 """Offline pipeline: load documents, split them, store them as vectors."""
 
-from rag_agent.indexing.hybrid import forget_keyword_index, fuse, keyword_index, tokenise
+from rag_agent.indexing.database import (
+    DatabaseUnavailableError,
+    describe_database,
+    ensure_extensions,
+    ensure_search_indexes,
+    forget_engine,
+    get_engine,
+    verify_connection,
+)
+from rag_agent.indexing.hybrid import fuse, tokenise
+from rag_agent.indexing.keyword import keyword_search
 from rag_agent.indexing.loader import SUPPORTED_SUFFIXES, load_documents
 from rag_agent.indexing.splitter import split_documents
 from rag_agent.indexing.vector_store import (
-    VectorStoreUnavailableError,
     count_documents,
     describe_location,
     get_vector_store,
@@ -15,17 +24,22 @@ from rag_agent.indexing.vector_store import (
 
 __all__ = [
     "SUPPORTED_SUFFIXES",
-    "VectorStoreUnavailableError",
+    "DatabaseUnavailableError",
     "count_documents",
+    "describe_database",
     "describe_location",
-    "forget_keyword_index",
+    "ensure_extensions",
+    "ensure_search_indexes",
+    "forget_engine",
     "fuse",
+    "get_engine",
     "get_vector_store",
     "index_documents",
-    "keyword_index",
+    "keyword_search",
     "load_documents",
     "reset_index",
     "search",
     "split_documents",
     "tokenise",
+    "verify_connection",
 ]

@@ -28,7 +28,7 @@ from rag_agent.api.schemas import (
 from rag_agent.api.sessions import RedisSessionStore, SessionStore
 from rag_agent.config import Settings, get_settings
 from rag_agent.evaluation.metrics import extract_retrieved_sources
-from rag_agent.indexing import VectorStoreUnavailableError, count_documents, describe_location
+from rag_agent.indexing import DatabaseUnavailableError, count_documents, describe_location
 from rag_agent.observability import flush
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def health() -> HealthResponse:
     """
     try:
         indexed = count_documents()
-    except VectorStoreUnavailableError as error:
+    except DatabaseUnavailableError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
@@ -171,7 +171,7 @@ def _require_index() -> None:
 def _safe_count() -> int:
     try:
         return count_documents()
-    except VectorStoreUnavailableError as error:
+    except DatabaseUnavailableError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),

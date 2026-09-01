@@ -1,8 +1,9 @@
-"""The vector store: persisting chunks as vectors and searching by meaning.
+"""The vector store: persisting chunks as vectors and searching them.
 
-Two deployment modes share one interface. Embedded keeps the index in a local
-file and needs nothing running; server talks to a standalone Chroma over HTTP,
-which is what lets storage scale and restart independently of the application.
+Postgres with pgvector holds the embeddings, and the same rows answer keyword
+search through the full text index. One database means the vector and the
+metadata are written in the same transaction and cannot drift apart, and it
+means the operational burden is a database the organisation already runs.
 """
 
 from __future__ import annotations
@@ -10,28 +11,72 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_postgres import PGVector
+from sqlalchemy import text
 
-from rag_agent.config import SearchStrategy, Settings, VectorStoreMode, get_settings
-from rag_agent.indexing.hybrid import FUSION_POOL, forget_keyword_index, fuse, keyword_index
+from rag_agent.config import SearchStrategy, get_settings
+from rag_agent.indexing.database import (
+    COLLECTION_TABLE,
+    EMBEDDING_TABLE,
+    DatabaseUnavailableError,
+    describe_database,
+    ensure_extensions,
+    ensure_search_indexes,
+    get_engine,
+    verify_connection,
+)
+from rag_agent.indexing.hybrid import FUSION_POOL, fuse, identity
+from rag_agent.indexing.keyword import keyword_search
 from rag_agent.providers import build_embeddings
 from rag_agent.types import SearchHit
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "DatabaseUnavailableError",
+    "count_documents",
+    "describe_location",
+    "get_vector_store",
+    "index_documents",
+    "reset_index",
+    "search",
+]
 
-class VectorStoreUnavailableError(RuntimeError):
-    """The configured Chroma server could not be reached."""
+_COUNT = text(
+    f"""
+    SELECT count(*)
+    FROM {EMBEDDING_TABLE} AS embedding
+    JOIN {COLLECTION_TABLE} AS collection
+      ON embedding.collection_id = collection.uuid
+    WHERE collection.name = :collection
+    """
+)
 
 
-def get_vector_store() -> Chroma:
-    """Open the vector store described by the current settings."""
+def get_vector_store() -> PGVector:
+    """Open the vector store described by the current settings.
+
+    The extensions and the text search configuration are ensured on the way
+    in. They are idempotent, and doing it here means a fresh database becomes
+    usable by being pointed at, rather than by remembering a setup command.
+    """
     settings = get_settings()
 
-    if settings.vector_store_mode is VectorStoreMode.SERVER:
-        return _open_server_store(settings)
-    return _open_embedded_store(settings)
+    verify_connection()
+    ensure_extensions()
+
+    return PGVector(
+        embeddings=build_embeddings(),
+        connection=get_engine(),
+        collection_name=settings.collection_name,
+        # Declaring the width turns the column into a fixed-size vector, which
+        # is what an approximate index can be built on. Left undeclared, the
+        # column is unconstrained and every search reads every row.
+        embedding_length=settings.embedding_dimensions,
+        use_jsonb=True,
+        create_extension=False,
+    )
 
 
 def index_documents(chunks: list[Document]) -> int:
@@ -43,9 +88,9 @@ def index_documents(chunks: list[Document]) -> int:
     store = get_vector_store()
     store.add_documents(documents=chunks, ids=[_stable_id(chunk) for chunk in chunks])
 
-    # The keyword index is a copy of what is stored, so it goes stale the
-    # moment the store changes.
-    forget_keyword_index()
+    # The tables exist only once something has been written to them, so this
+    # is the first moment the indexes can be built.
+    ensure_search_indexes()
 
     logger.info("Indexed %d chunk(s) in %s", len(chunks), describe_location())
     return len(chunks)
@@ -57,8 +102,8 @@ def search(query: str, k: int | None = None) -> list[SearchHit]:
     In `vector` mode this is nearest-neighbour on the embedding, and the hits
     carry their distance. In `hybrid` mode a keyword ranking is fused with it,
     and the distance is no longer meaningful for the fused list: two rankings
-    are merged by position, not by score, because a cosine distance and a BM25
-    score are not on the same scale.
+    are merged by position, not by score, because a cosine distance and a text
+    search rank are not on the same scale.
     """
     settings = get_settings()
     limit = settings.retrieval_k if k is None else k
@@ -70,34 +115,42 @@ def search(query: str, k: int | None = None) -> list[SearchHit]:
     pool = limit * FUSION_POOL
     scored = get_vector_store().similarity_search_with_score(query, k=pool)
 
-    index = keyword_index()
-    if index is None:
+    by_keyword = keyword_search(query, pool)
+    if not by_keyword:
         return [
             SearchHit(document=document, distance=distance) for document, distance in scored[:limit]
         ]
 
     by_vector = [document for document, _ in scored]
-    distances = {_identity(document): distance for document, distance in scored}
+    distances = {identity(document): distance for document, distance in scored}
 
-    fused = fuse([by_vector, index.rank(query, pool)], limit=limit)
+    fused = fuse([by_vector, by_keyword], limit=limit)
 
     # A document the keyword search contributed has no distance of its own.
     # Reporting the worst seen keeps the field honest rather than inventing a
     # number that would read as a similarity.
     fallback = max(distances.values(), default=0.0)
     return [
-        SearchHit(document=document, distance=distances.get(_identity(document), fallback))
+        SearchHit(document=document, distance=distances.get(identity(document), fallback))
         for document in fused
     ]
 
 
-def _identity(document: Document) -> str:
-    return f"{document.metadata.get('source', '')}::{document.page_content}"
-
-
 def count_documents() -> int:
     """How many chunks are currently indexed."""
-    return len(get_vector_store().get(include=[])["ids"])
+    verify_connection()
+
+    with get_engine().connect() as connection:
+        try:
+            total = connection.execute(
+                _COUNT, {"collection": get_settings().collection_name}
+            ).scalar()
+        except Exception:
+            # Nothing has been indexed yet, so langchain-postgres has not
+            # created its tables. An empty index is the honest answer.
+            return 0
+
+    return int(total or 0)
 
 
 def reset_index() -> None:
@@ -108,65 +161,22 @@ def reset_index() -> None:
     way to clear the collection, the old chunks stay behind and compete for
     retrieval against the new ones.
     """
-    store = get_vector_store()
-    store.delete_collection()
-    forget_keyword_index()
+    get_vector_store().delete_collection()
     logger.info("Cleared the index at %s", describe_location())
 
 
 def describe_location() -> str:
     """Where the index lives, for diagnostics and log messages."""
-    settings = get_settings()
-
-    if settings.vector_store_mode is VectorStoreMode.SERVER:
-        return f"chroma://{settings.chroma_host}:{settings.chroma_port}"
-    return str(settings.vector_store_dir)
-
-
-def _open_embedded_store(settings: Settings) -> Chroma:
-    """Open the on-disk store, creating its directory if needed."""
-    settings.vector_store_dir.mkdir(parents=True, exist_ok=True)
-
-    return Chroma(
-        collection_name=settings.collection_name,
-        embedding_function=build_embeddings(),
-        persist_directory=str(settings.vector_store_dir),
-    )
-
-
-def _open_server_store(settings: Settings) -> Chroma:
-    """Connect to a standalone Chroma server.
-
-    A connection failure is translated on the spot: the driver's own error
-    names an internal endpoint and tells the reader nothing about which knob
-    to turn.
-    """
-    import chromadb
-
-    try:
-        client = chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
-        client.heartbeat()
-    except Exception as error:
-        msg = (
-            f"Não foi possível conectar ao Chroma em "
-            f"{settings.chroma_host}:{settings.chroma_port}. "
-            f"Suba o servidor (docker compose up -d chroma) ou volte para "
-            f"VECTOR_STORE_MODE=embedded."
-        )
-        raise VectorStoreUnavailableError(msg) from error
-
-    return Chroma(
-        client=client,
-        collection_name=settings.collection_name,
-        embedding_function=build_embeddings(),
-    )
+    return describe_database()
 
 
 def _stable_id(chunk: Document) -> str:
     """Derive a deterministic id from the chunk's source and content.
 
     This is what makes ingestion idempotent: running it twice overwrites the
-    same records instead of duplicating the whole index.
+    same records instead of duplicating the whole index. It is also what makes
+    the ingestion safe to retry from a queue, where the same message can be
+    delivered more than once.
     """
     raw = f"{chunk.metadata.get('source', '')}::{chunk.page_content}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

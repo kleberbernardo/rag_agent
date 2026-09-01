@@ -15,8 +15,9 @@ says so instead of inventing one.
 - **Cited**: every answer names its source file.
 - **Agentic**: the model decides when to search, can search again with
   different terms, and can reach for other tools.
-- **Local index**: the vector store is an embedded database on disk. No server
-  to run, or point it at a standalone Chroma with one variable.
+- **One database**: Postgres with pgvector holds the embeddings and answers
+  keyword search over the same rows, so a chunk and its metadata are written
+  in a single transaction and cannot drift apart.
 - **Measured**: every answer reports its latency, token usage and estimated
   cost, with optional full tracing to Langfuse.
 - **Domain-agnostic**: the subject lives in configuration, not in code. Swap
@@ -37,15 +38,15 @@ service layer.
 ```
 INGESTION  ·  offline, `rag ingest`
 
-   data/*.pdf ──► loader ──► splitter ──► embeddings ──► Chroma
-                  pdf, md    per article    OpenAI       embedded file
-                  txt, rst   Art. 1, 2…                  or server
+   data/*.pdf ──► loader ──► splitter ──► embeddings ──► Postgres
+                  pdf, md    per article    OpenAI       pgvector
+                  txt, rst   Art. 1, 2…                  + full text
 
 
 QUERY  ·  online
 
    CLI  rag ask ───┐
-                   ├──► service ──► agent ──┬──► search_documentation ──► Chroma
+                   ├──► service ──► agent ──┬──► search_documentation ──► Postgres
    API  POST /ask ─┘                  ▲     │
                                       │     └──► calculate
                                       └─────────┘  the result comes back
@@ -130,7 +131,7 @@ Ten steps on the graph is the second cap, and the safety net behind the first.
 |---|---|
 | Orchestration | LangChain, LangGraph through `create_agent` |
 | Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small` |
-| Vector store | ChromaDB, embedded or as a server |
+| Vector store | Postgres 17 with pgvector, and its full text search |
 | HTTP | FastAPI, Uvicorn |
 | CLI | Typer, Rich |
 | Configuration | Pydantic Settings |
@@ -324,7 +325,7 @@ consolidated resolutions from the CVM, the Brazilian securities regulator.
 offerings. Provenance is recorded in `docs/knowledge-base-sources.md`.
 
 Nothing in the code depends on them. To use your own, empty `data/`, set
-`KNOWLEDGE_DOMAIN` in `.env`, delete `.chroma/` and re-ingest.
+`KNOWLEDGE_DOMAIN` in `.env` and run `rag ingest --reset`.
 
 ### 2. Build the index
 
@@ -451,15 +452,16 @@ message rather than failing mid-query.
 | `CHUNK_SIZE` | `1000` | Max characters per chunk. |
 | `ARTICLE_MAX_CHARS` | `4000` | Cap above which a single article is split further. |
 | `CHUNK_OVERLAP` | `200` | Characters repeated between neighbouring chunks. |
-| `SEARCH_STRATEGY` | `hybrid` | `hybrid` fuses BM25 with the embedding; `vector` uses the embedding alone. |
+| `SEARCH_STRATEGY` | `hybrid` | `hybrid` fuses the database's full text search with the embedding; `vector` uses the embedding alone. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
 | `DATA_DIR` | `data/` | Where your documents live. |
 | `LOG_DIR` | `logs/` | Where the log file is written. |
-| `VECTOR_STORE_MODE` | `embedded` | `embedded` for a local file, `server` for a standalone Chroma. |
-| `VECTOR_STORE_DIR` | `.chroma/` | Where the index is written in embedded mode. |
-| `CHROMA_HOST` / `CHROMA_PORT` | `localhost` / `8000` | The Chroma server address, used in server mode. |
+| `DATABASE_URL` | `postgresql+psycopg://rag:rag@localhost:5432/rag` | Where the index lives. The driver is named because SQLAlchemy defaults to psycopg2. |
+| `DATABASE_POOL_SIZE` | `5` | Connections held open per process. Replicas multiply this. |
+| `DATABASE_MAX_OVERFLOW` | `10` | Extra connections allowed above the pool under load. |
+| `EMBEDDING_DIMENSIONS` | `1536` | Width of the embedding column. Must match the model. |
 | `COLLECTION_NAME` | `rag_agent_docs` | Collection name inside the store. |
 | `LANGFUSE_PUBLIC_KEY` | none | Optional. Enables tracing when set together with the secret key. |
 | `LANGFUSE_SECRET_KEY` | none | Optional. See [Observability](#observability). |
@@ -482,7 +484,7 @@ The system has two phases that never run at the same time.
 ### Phase 1: ingestion (offline)
 
 ```
-data/*  ──▶  load  ──▶  split  ──▶  embed  ──▶  .chroma/
+data/*  ──▶  load  ──▶  split  ──▶  embed  ──▶  Postgres
           (loader)   (splitter)  (providers)  (vector_store)
 ```
 
@@ -516,20 +518,43 @@ Measured on the shipped corpus: **93% by characters, 97% by articles.**
 vector: a list of numbers positioning that text in semantic space. Chunks that
 mean similar things land near each other.
 
-**Store**. Vectors are written to Chroma. Each chunk gets an id derived from
+**Store**. Vectors are written to Postgres. Each chunk gets an id derived from
 a hash of its source and content, so re-ingestion overwrites instead of
-duplicating.
+duplicating. That is also what makes ingestion safe to retry from a queue,
+where the same message can be delivered more than once.
 
 The store runs in one of two modes, chosen by `VECTOR_STORE_MODE`:
 
-| Mode | What it is | When |
-|---|---|---|
-| `embedded` | A local file. Nothing to run. | Default: clone and try it |
-| `server` | A standalone Chroma over HTTP | Storage that restarts and scales apart from the app |
+Postgres is the only mode. An embedded file would be one less thing to run,
+and it would also be a second storage engine to keep behaving like the first,
+which is a cost paid on every change to retrieval for a convenience that ends
+the moment the corpus is shared.
 
-Both expose the same interface, so switching is a configuration change. In
-server mode an unreachable Chroma fails with an actionable message instead of
-a driver stack trace.
+An unreachable database fails with a message that names the address it tried
+and the command that brings it up, rather than a driver stack trace. The
+password is removed from every rendering of the URL, including that message.
+
+### Why Postgres
+
+| | |
+|---|---|
+| **Two retrievers, one store** | The vectors and the text sit in the same rows, so keyword search needs no second system and no copy that can go stale. |
+| **One transaction** | A chunk, its metadata and its vector are written together or not at all. |
+| **Already there** | Most organisations run Postgres. This adds an extension, not a database to operate. |
+| **Managed everywhere** | RDS, Cloud SQL, Supabase, Neon all ship pgvector. |
+| **Debuggable** | The index is inspectable with `SELECT`, not through a proprietary API. |
+
+Two indexes are built after the first write, since neither can exist before
+the tables do. `HNSW` on the vector column is the approximate nearest
+neighbour index; without it pgvector is exact, which is correct and reads
+every row. `GIN` on the text expression is what keeps keyword search from
+parsing every stored document on every query. Both are the difference between
+a corpus of hundreds and one of millions.
+
+The ceiling is somewhere above ten million vectors, or heavy metadata
+filtering at high query rates. Past that the answer is a dedicated engine such
+as Qdrant, and the change is one class: nothing in the fusion, the agent or
+the evaluation knows which store answered.
 
 ### Phase 2: query (online)
 
@@ -547,8 +572,9 @@ store returns the nearest chunks. This is why "what does the cheapest tier
 cost" finds the right passage even when neither "cheapest" nor "tier" appears
 in the text. Matching happens on meaning, not on words.
 
-> Change `EMBEDDING_MODEL` and you must delete `.chroma/` and re-ingest.
-> Vectors from different models are not comparable.
+> Change `EMBEDDING_MODEL` and you must run `rag ingest --reset`, and set
+> `EMBEDDING_DIMENSIONS` to match. Vectors from different models are neither
+> comparable nor the same width.
 
 ### Why an agent, not a plain pipeline
 
@@ -746,7 +772,7 @@ and to the embeddings.
 | Situation | Response |
 |---|---|
 | Empty index | `503` naming the ingestion step |
-| Chroma unreachable | `503` naming the address it tried |
+| Postgres unreachable | `503` naming the address it tried, password removed |
 | Malformed body | `422` from the schema |
 | Missing or wrong API key | `401`, when `API_KEY` is set |
 | Unknown session on delete | `404` |
@@ -891,20 +917,22 @@ costs less than that.
 
 ## Running with Docker
 
-Two services: the agent and a standalone Chroma. This is what
-`VECTOR_STORE_MODE=server` exists for. The index lives in its own container,
-with its own volume, and survives the application entirely.
+Three services: the agent, Postgres with pgvector, and Redis for sessions.
+The index lives in its own container, with its own volume, and survives the
+application entirely.
 
 ```bash
 export OPENAI_API_KEY=sk-...        # Windows: $env:OPENAI_API_KEY='sk-...'
 
-docker compose up -d                     # Chroma, then the API
+docker compose up -d                     # Postgres and Redis, then the API
 docker compose run --rm api ingest       # build the index
 curl localhost:8080/health
 ```
 
-`docker compose up` brings up both services. The API waits for Chroma to report
-healthy before starting, and has a healthcheck of its own hitting `/health`.
+`docker compose up` brings up all three. The API waits for Postgres to accept
+connections before starting, and has a healthcheck of its own hitting
+`/health`. The extensions and the text search configuration are created by the
+application on first use, so a fresh database needs no setup step.
 
 The image serves the API by default and still runs the CLI on demand, because
 the entrypoint is the `rag` command itself:
@@ -918,7 +946,7 @@ docker compose run --rm api ingest --reset
 The index survives restarts:
 
 ```bash
-docker compose restart chroma
+docker compose restart postgres
 docker compose run --rm api status   # still 590 chunks
 ```
 
@@ -929,12 +957,11 @@ tear everything down including the index:
 docker compose down -v
 ```
 
-**On image size:** the runtime image is ~618 MB. Most of that is `chromadb`
-pulling in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust bindings
-(57 MB), all of it machinery for running Chroma as a server, which this
-container never does. Swapping to the thin `chromadb-client` would cut roughly 200 MB, at the
-cost of an image that can no longer run in embedded mode. Not worth the hidden
-constraint for the saving.
+**On image size:** the runtime image is ~422 MB, down from ~618 MB when the
+store was Chroma. The saving is not an optimisation, it is a consequence:
+`chromadb` pulled in `kubernetes` (83 MB), `onnxruntime` (66 MB) and Rust
+bindings (57 MB), all of it machinery for running Chroma as a server, which
+this container never did. A Postgres client is a driver.
 
 ---
 
@@ -1175,7 +1202,8 @@ that shares none of its words. It also spreads a long article's signal across
 everything the article discusses, so one sentence stating a deadline ranks
 below whatever the article is mostly about.
 
-BM25 compares words. It cannot follow a paraphrase, and it does not need to
+Postgres full text search compares words. It cannot follow a paraphrase, and
+it does not need to
 when the question names the terms the text uses.
 
 Measured on this corpus, on the question the suite failed for weeks: the
@@ -1185,7 +1213,7 @@ passage stating the suspension deadline sits at **rank 31 by embedding** and at
 The two lists are merged by reciprocal rank fusion. Each document scores the
 sum of `1 / (60 + rank)` over the lists it appears in, so a passage both
 retrievers rank well beats one a single retriever loves. Fusing on rank rather
-than on score is what makes it work at all: a cosine distance and a BM25 score
+than on score is what makes it work at all: a cosine distance and a text search rank
 are not on the same scale and cannot be added.
 
 Each retriever is asked for five times the passages wanted, and the fused list
@@ -1358,7 +1386,7 @@ service loop with a fake model) and need no API key. Tests marked
 | `O índice está vazio` | Run `rag ingest` |
 | `Pasta de dados não encontrada` | Check `DATA_DIR` with `rag status` |
 | OpenAI authentication error | Check `OPENAI_API_KEY` in `.env` |
-| Nonsense answers after changing models | Delete `.chroma/` and re-ingest |
+| Nonsense answers after changing models | Run `rag ingest --reset` |
 | Answers missing detail | Raise `RETRIEVAL_K` or `CHUNK_SIZE` |
 | Broken accents on Windows | `set PYTHONIOENCODING=utf-8` |
 

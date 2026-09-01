@@ -1,17 +1,16 @@
-"""Keyword search alongside the embedding, fused into one ranking.
+"""Fusing two rankings into one.
 
 An embedding spreads a long article's signal across everything the article
 discusses, so one sentence stating a deadline ranks below the article's main
 subject. Keyword search does not have that problem, and cannot follow a
-paraphrase. Both run, and the two rankings are merged.
+paraphrase. Both run, and this is where the two rankings are merged.
 """
 
 from __future__ import annotations
 
-import pytest
 from langchain_core.documents import Document
 
-from rag_agent.indexing.hybrid import RRF_CONSTANT, fuse, keyword_index, tokenise
+from rag_agent.indexing.hybrid import RRF_CONSTANT, fuse, tokenise
 
 
 def chunk(text: str, source: str = "doc.pdf") -> Document:
@@ -85,86 +84,3 @@ class TestFusion:
 
     def test_the_constant_is_the_published_one(self) -> None:
         assert RRF_CONSTANT == 60
-
-
-class TestKeywordIndex:
-    def test_it_ranks_by_word_overlap(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from rag_agent.indexing import hybrid
-
-        class FakeStore:
-            def get(self, include: list[str]) -> dict:
-                return {
-                    "documents": [
-                        "A SRE pode suspender ou cancelar a oferta a qualquer tempo.",
-                        "O prazo de suspensão da oferta não pode ser superior a 30 dias.",
-                        "O lote suplementar não pode ultrapassar 15% da quantidade.",
-                    ],
-                    "metadatas": [{"source": "r.pdf"}] * 3,
-                }
-
-        monkeypatch.setattr("rag_agent.indexing.vector_store.get_vector_store", lambda: FakeStore())
-        hybrid.forget_keyword_index()
-
-        index = keyword_index()
-
-        assert index is not None
-        assert "30 dias" in index.rank("prazo de suspensão da oferta", 1)[0].page_content
-
-    def test_an_empty_store_has_no_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A caller can then fall back to the vector search rather than fail."""
-        from rag_agent.indexing import hybrid
-
-        class EmptyStore:
-            def get(self, include: list[str]) -> dict:
-                return {"documents": [], "metadatas": []}
-
-        monkeypatch.setattr(
-            "rag_agent.indexing.vector_store.get_vector_store", lambda: EmptyStore()
-        )
-        hybrid.forget_keyword_index()
-
-        assert keyword_index() is None
-
-    def test_it_is_built_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from rag_agent.indexing import hybrid
-
-        builds = 0
-
-        class CountingStore:
-            def get(self, include: list[str]) -> dict:
-                nonlocal builds
-                builds += 1
-                return {"documents": ["texto"], "metadatas": [{"source": "r.pdf"}]}
-
-        monkeypatch.setattr(
-            "rag_agent.indexing.vector_store.get_vector_store", lambda: CountingStore()
-        )
-        hybrid.forget_keyword_index()
-
-        keyword_index()
-        keyword_index()
-
-        assert builds == 1
-
-    def test_forgetting_it_forces_a_rebuild(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The index is a copy, so it goes stale when the store changes."""
-        from rag_agent.indexing import hybrid
-
-        builds = 0
-
-        class CountingStore:
-            def get(self, include: list[str]) -> dict:
-                nonlocal builds
-                builds += 1
-                return {"documents": ["texto"], "metadatas": [{"source": "r.pdf"}]}
-
-        monkeypatch.setattr(
-            "rag_agent.indexing.vector_store.get_vector_store", lambda: CountingStore()
-        )
-        hybrid.forget_keyword_index()
-
-        keyword_index()
-        hybrid.forget_keyword_index()
-        keyword_index()
-
-        assert builds == 2

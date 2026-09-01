@@ -101,7 +101,7 @@ def build_run_config(*, session_id: str) -> dict[str, Any]:
     settings = get_settings()
     config["metadata"] = {
         "langfuse_session_id": session_id,
-        "langfuse_tags": ["rag-agent", settings.vector_store_mode.value],
+        "langfuse_tags": ["rag-agent", settings.search_strategy.value],
         "knowledge_domain": settings.knowledge_domain,
         "chat_model": settings.chat_model,
         "embedding_model": settings.embedding_model,

@@ -33,13 +33,6 @@ class SessionBackend(StrEnum):
     REDIS = "redis"
 
 
-class VectorStoreMode(StrEnum):
-    """Where the vector store lives."""
-
-    EMBEDDED = "embedded"
-    SERVER = "server"
-
-
 def _find_project_root() -> Path:
     """Walk up from this file until the directory holding the project marker.
 
@@ -94,11 +87,13 @@ class Settings(BaseSettings):
     # reports finding nothing, and the model keeps rewording. Measured on this
     # corpus, a distance threshold cannot separate the two cases: the worst
     # valid question scores 0.97 and the best invalid one 0.84. A budget can.
-    # `hybrid` runs BM25 alongside the embedding and fuses the two rankings.
-    # An embedding spreads a long article's signal across everything the
-    # article discusses, so one sentence stating a deadline ranks below the
-    # article's main subject. Keyword search does not have that problem, and
-    # cannot follow a paraphrase, which is why both run.
+
+    # `hybrid` runs the database's full text search alongside the embedding
+    # and fuses the two rankings. An embedding spreads a long article's
+    # signal across everything the article discusses, so one sentence
+    # stating a deadline ranks below the article's main subject. Keyword
+    # search does not have that problem, and cannot follow a paraphrase,
+    # which is why both run.
     search_strategy: SearchStrategy = Field(default=SearchStrategy.HYBRID)
 
     max_searches_per_turn: int = Field(default=3, gt=0, le=10)
@@ -114,11 +109,23 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=PROJECT_ROOT / "data")
     log_dir: Path = Field(default=PROJECT_ROOT / "logs")
 
-    vector_store_mode: VectorStoreMode = Field(default=VectorStoreMode.EMBEDDED)
-    vector_store_dir: Path = Field(default=PROJECT_ROOT / ".chroma")
-    chroma_host: str = Field(default="localhost")
-    chroma_port: int = Field(default=8000, gt=0, le=65535)
+    # Postgres holds the vectors and answers keyword search over the same
+    # rows, so a chunk and its metadata are written in one transaction and
+    # cannot drift apart. The driver is named in the URL because SQLAlchemy
+    # defaults to psycopg2, which is not what is installed.
+    database_url: str = Field(
+        default="postgresql+psycopg://rag:rag@localhost:5432/rag",
+        min_length=1,
+    )
+    database_pool_size: int = Field(default=5, gt=0, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=100)
     collection_name: str = Field(default="rag_agent_docs")
+
+    # The width of the embedding column. Declaring it is what allows an
+    # approximate index to be built; left undeclared, every search reads every
+    # row. It must match the model: text-embedding-3-small is 1536 wide and
+    # text-embedding-3-large is 3072.
+    embedding_dimensions: int = Field(default=1536, gt=0)
 
     session_backend: SessionBackend = Field(default=SessionBackend.MEMORY)
     redis_url: str = Field(default="redis://localhost:6379/0")
