@@ -129,17 +129,24 @@ Ten steps on the graph is the second cap, and the safety net behind the first.
 
 | Layer | Used |
 |---|---|
-| Orchestration | LangChain, LangGraph through `create_agent` |
-| Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small` |
+| Orchestration | LangChain 1.x and LangGraph 1.x, through `create_agent` |
+| Model | OpenAI: `gpt-4o-mini`, `text-embedding-3-small`, reached through `langchain-openai` |
 | Vector store | Postgres 17 with pgvector, and its full text search |
-| Reranking | Optional cross-encoder, `BAAI/bge-reranker-v2-m3` |
+| Database access | `langchain-postgres`, SQLAlchemy 2, `psycopg` 3 |
+| Chunking | `langchain-text-splitters` |
+| Reranking | Optional cross-encoder, `BAAI/bge-reranker-v2-m3`, through `sentence-transformers` |
+| Guardrails | LLM Guard: prompt injection, secrets, anonymisation |
 | HTTP | FastAPI, Uvicorn |
+| Sessions | In process by default, Redis when shared across replicas |
 | CLI | Typer, Rich |
-| Configuration | Pydantic Settings |
+| Configuration | Pydantic 2, Pydantic Settings, python-dotenv |
 | Documents | pypdf |
 | Observability | Langfuse, optional |
-| Quality | pytest, ruff, mypy |
+| Quality | pytest, pytest-cov, httpx, ruff, mypy |
 | Infrastructure | Docker, Compose, GitHub Actions |
+
+Python 3.12 or newer. Every OpenAI import lives in `providers.py`, which is the
+only file a provider swap rewrites.
 
 ## Concepts
 
@@ -241,18 +248,22 @@ project root without the `rag` command.
 
 ## Commands
 
-Eight commands. Three of them are what you use daily.
+Nine commands. Three of them are what you use daily.
 
-| Command | What it does |
-|---|---|
-| `rag ingest` | Read `data/`, split it, index it. Run it once, and again when the documents change. |
-| `rag ask "..."` | One question. |
-| `rag chat` | A conversation with memory. |
-| `rag status` | The active configuration and how many chunks are indexed. |
-| `rag eval` | Grade the agent against the 29 questions. |
-| `rag serve` | Start the HTTP API. |
-| `rag prompt show` \| `push` | Read the prompt in force; publish the local ones. |
-| `rag dataset push` | Upload the evaluation dataset to Langfuse. |
+| Command | What it does | Flags |
+|---|---|---|
+| `rag ingest` | Read `data/`, split it, index it. Run it once, and again when the documents change. | `--reset`, `-v` |
+| `rag ask "..."` | One question. | `--trace`, `-v` |
+| `rag chat` | A conversation with memory. | `--trace`, `-v` |
+| `rag status` | The active configuration and how many chunks are indexed. | |
+| `rag sources` | List the indexed documents, or drop one of them from the index. | `--remove <file>`, `--yes` |
+| `rag eval` | Grade the agent against the 29 questions. | See the table below |
+| `rag serve` | Start the HTTP API. | `--host`, `--port`, `--reload`, `-v` |
+| `rag prompt show` \| `push` | Read the prompt in force; publish the local ones. | `--message`, `-v` |
+| `rag dataset push` | Upload the evaluation dataset to Langfuse. | `--dataset`, `-v` |
+
+`--verbose` and `-v` mean the same thing on every command that takes it, and
+raise the log level for that run.
 
 ### `rag eval` in full
 
@@ -1250,6 +1261,82 @@ copy.
 so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
 and drifts; one run at 100% is not a guarantee of the next.
 
+### Guardrails
+
+Three layers on the way in, one on the way out. They run from
+`agent/service.py`, so the CLI and the API are covered by construction and a
+new interface cannot forget.
+
+| Layer | Checks | On failure |
+|---|---|---|
+| Arithmetic | Empty, and length against `MAX_QUESTION_CHARS` | Refuses |
+| Scanning | Secrets, e-mail, credit card, and **CPF, CNPJ, API keys** | Refuses |
+| Injection | Whether the question is an instruction | Refuses |
+| Output | Citation present, token ceiling | **Records a finding** |
+
+**A question is refused before it costs anything. An answer has already been
+paid for by the time it can be judged**, so what happens to it is a finding
+attached to the result, never an exception. Citation in particular is a
+finding and not a refusal: a correct refusal cites nothing, and this corpus
+has four questions it cannot answer on purpose.
+
+#### LLM Guard, configured rather than used as shipped
+
+LLM Guard is the standard and it is built for English. Its own
+`ALL_SUPPORTED_LANGUAGES` is `["en", "zh"]` and its default entity list is
+`US_SSN` and `US_BANK_NUMBER`. Measured here, before any configuration:
+
+| Question | Verdict |
+|---|---|
+| "qual o prazo máximo de suspensão?" | **refused**, confidence 1.00 |
+| "what is the maximum suspension period?" | passed |
+| "o que diz o Art. 70 da Resolução 160?" | **refused**, read 160 as an account number |
+| a CPF | **passed** |
+
+It refused every real question and missed the one identifier that matters in
+Brazil. What fixed it: dropping its English-only injection scanner, narrowing
+`entity_types` to the language-neutral patterns, and adding CPF, CNPJ and API
+keys by regex.
+
+#### The injection classifier was chosen by measurement
+
+Eight cases, four of them attacks, half in Portuguese:
+
+| Model | Correct | False positives |
+|---|---|---|
+| **`katanemolabs/Arch-Guard`** | **7/8** | **0** |
+| `testsavantai/prompt-injection-defender-large-v0` | 6/8 | 0 |
+| `jackhhao/jailbreak-classifier` | 5/8 | 0 |
+| `protectai/deberta-v3-base-prompt-injection-v2` | 5/8 | **3** |
+
+The last row is LLM Guard's default. Meta's Prompt Guard 2 is the model the
+market reaches for first and is multilingual by design; it is also a gated
+repository, so it needs a licence and a token. `INJECTION_MODEL` switches to
+it in one setting.
+
+#### Indirect injection is the risk that belongs to RAG
+
+A retrieved passage is pasted into the context and the model reads it the way
+it reads the system prompt. A retriever works in embedding space and has no
+notion of "this is data" rather than "this is an instruction", so a document
+carrying a hidden instruction attacks **every question that retrieves it**.
+
+The corpus is therefore scanned **at ingestion**, once per chunk, never per
+question: the documents change only when someone indexes them, so the answer
+cannot change between two questions. Measured on five chunks with one
+poisoned: one flagged, four genuine articles clean.
+
+A flagged chunk warns rather than refuses. This corpus is regulation, and
+regulation tells the reader what to do, so a classifier trained on jailbreaks
+will sometimes read a genuine article as an instruction. Refusing to index
+would silently drop the law.
+
+#### What is not covered
+
+- **Permission-aware retrieval.** Anyone who can ask can retrieve any chunk.
+- **Output PII.** Only the question is scanned.
+- **Rate limiting.** No per-caller cost ceiling yet.
+
 ### Reranking
 
 Off by default. This section is as much about why as about how.
@@ -1312,27 +1399,22 @@ a hundred or more to be confident of recall, and a hundred passages do not fit
 in a prompt. The reranker is the funnel between those two facts.
 
 ```bash
-pip install -e ".[rerank]"
 RERANK_STRATEGY=cross_encoder rag ask "qual o prazo de suspensão?"
 ```
 
-> **On Windows**, that install fails with `OSError: [Errno 2] No such file or
-> directory` on a torch header, if long path support is off. torch ships
-> headers whose paths exceed 260 characters. Enable it once, as administrator:
-> `Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
-> -Name LongPathsEnabled -Value 1`, then reopen the terminal. Nothing else in
-> this project needs it.
+The package is already installed: guardrails need torch, so the reranker costs
+almost nothing on top of it. The weights are a 2.2 GB download on first use.
 
 The pool widens on its own when it is enabled: `RERANK_CANDIDATES` replaces
 `RETRIEVAL_K` as the retrieval width, because a reranker handed exactly what
 it returns has nothing to choose between.
 
-**On the dependency.** A local cross-encoder means torch, roughly two
-gigabytes of wheels. That is why it is an extra rather than a dependency: the
-runtime image stays at 422 MB until someone opts in. At scale the answer is
-neither of those, it is a reranking service of its own, so the model is loaded
-once behind an endpoint instead of once per API replica. The interface here is
-one method, so that is a class, not a rewrite.
+**On the dependency.** A local cross-encoder means torch. That used to be
+the argument for keeping it optional, and it stopped being one when the
+guardrails made torch a hard dependency anyway. At scale the answer is neither
+in-process nor optional, it is a reranking service of its own, so the model is
+loaded once behind an endpoint instead of once per API replica. The interface
+here is one method, so that is a class, not a rewrite.
 
 **On sending text to an API.** Cohere Rerank is the commercial standard and is
 very good. It also means the corpus leaves the network. For a regulated
@@ -1495,8 +1577,9 @@ service loop with a fake model) and need no API key. Tests marked
 | Nonsense answers after changing models | Run `rag ingest --reset` |
 | Answers missing detail | Raise `RETRIEVAL_K` or `CHUNK_SIZE` |
 | Broken accents on Windows | `set PYTHONIOENCODING=utf-8` |
-| `pip install -e ".[rerank]"` fails on a torch header | Enable long path support on Windows, see [Reranking](#reranking) |
-| `RerankerUnavailableError` | Install the extra, or set `RERANK_STRATEGY=none` |
+| `pip install -e .` fails on a torch header | Enable long path support on Windows: `Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1` |
+| Every question refused as injection | Check `INJECTION_MODEL`. The LLM Guard default refuses Portuguese |
+| `RerankerUnavailableError` | Reinstall dependencies, or set `RERANK_STRATEGY=none` |
 | Postgres unreachable | `docker compose up -d postgres`, or check `DATABASE_URL` |
 
 ---

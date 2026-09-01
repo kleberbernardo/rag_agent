@@ -42,6 +42,12 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "RERANK_MODEL",
         "RERANK_CANDIDATES",
         "MAX_SEARCHES_PER_TURN",
+        "GUARDRAILS_ENABLED",
+        "GUARDRAIL_SCANNER",
+        "MAX_QUESTION_CHARS",
+        "MAX_ANSWER_TOKENS",
+        "INJECTION_MODEL",
+        "SCAN_CORPUS_FOR_INJECTION",
         "DATA_DIR",
         "COLLECTION_NAME",
         "DATABASE_URL",
@@ -79,9 +85,13 @@ def _forget_caches() -> None:
     is measured in seconds. That is right in production and wrong in a suite,
     where the first test to build one would decide for every test after it.
     """
+    from rag_agent.guardrails.injection import forget_classifier
+    from rag_agent.guardrails.scanners import forget_scanners
     from rag_agent.indexing.reranker import forget_reranker
 
     forget_reranker()
+    forget_scanners()
+    forget_classifier()
 
 
 @pytest.fixture

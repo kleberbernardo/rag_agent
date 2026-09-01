@@ -41,6 +41,7 @@ stop.
 | [.claude/rules/indexing.md](.claude/rules/indexing.md) | Anything about retrieval, chunking or fusion |
 | [.claude/rules/database.md](.claude/rules/database.md) | Anything that writes SQL or touches the schema |
 | [.claude/rules/agent.md](.claude/rules/agent.md) | The graph, the tools, or the search budget |
+| [.claude/rules/guardrails.md](.claude/rules/guardrails.md) | Anything refused, scanned or flagged |
 | [.claude/rules/evaluation.md](.claude/rules/evaluation.md) | Metrics, dataset, the judge |
 | [.claude/rules/api.md](.claude/rules/api.md) | Routes, auth, sessions |
 | [.claude/rules/observability.md](.claude/rules/observability.md) | Langfuse, prompts, cost, logging |
@@ -113,7 +114,7 @@ question ─┬─▶ pgvector (meaning)   ─┐
 
 Details in [indexing.md](.claude/rules/indexing.md).
 
-## The five things that break silently
+## The six things that break silently
 
 1. **The retrieval pool width depends on whether reranking is on.** With it
    off, the pool is `RETRIEVAL_K` because the pool is the answer. Changing this
@@ -131,7 +132,11 @@ Details in [indexing.md](.claude/rules/indexing.md).
    `get_settings.cache_clear()`. A new setting also needs its name added to the
    `isolated_environment` fixture in `tests/conftest.py`.
 
-5. **A `ChatSession` cannot be pickled.** Redis storage persists only
+5. **`entity_types` filters the custom regex patterns by name.** A pattern
+   added to `regex_patterns` and missing from `ENTITY_TYPES` is built and
+   never consulted, which is how CPF detection was silently dead once.
+
+6. **A `ChatSession` cannot be pickled.** Redis storage persists only
    `messages_to_dict()` as JSON. State added outside the message history will
    not survive a round trip.
 
@@ -142,7 +147,7 @@ Do not present these as solved:
 | Gap | Note |
 |---|---|
 | `cli.py` is 634 lines at 0% coverage | Largest file. Split before adding a command |
-| No per-document delete | Only `reset_index()`, which drops everything |
+| No permission-aware retrieval | Anyone who can ask can retrieve any chunk |
 | `splitter.py` at 52% coverage | The article-splitting paths are under-tested |
 | No rate limiting, CORS, or Uvicorn workers | See [api.md](.claude/rules/api.md) |
 | `OPENAI_API_KEY` is not a GitHub secret | `evaluation.yml` silently skips |

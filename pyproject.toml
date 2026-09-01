@@ -30,15 +30,13 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "redis>=5.2,<9",
+    # Guardrails. torch and transformers come with it, which is why the
+    # reranker below costs almost nothing on top.
+    "llm-guard>=0.3.16,<1",
+    "sentence-transformers>=3.0,<7",
 ]
 
 [project.optional-dependencies]
-# A cross-encoder runs locally, which means torch. That is roughly 2 GB of
-# wheels for a second pass that is off by default, so it stays out of the
-# runtime image until someone turns reranking on.
-rerank = [
-    "sentence-transformers>=3.0,<7",
-]
 dev = [
     "pytest>=8.0",
     "httpx>=0.28",

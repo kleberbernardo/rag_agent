@@ -19,6 +19,13 @@ class SearchStrategy(StrEnum):
     HYBRID = "hybrid"
 
 
+class GuardrailScanner(StrEnum):
+    """Which scanning layer runs over a question before the model sees it."""
+
+    NONE = "none"
+    LLM_GUARD = "llm_guard"
+
+
 class RerankStrategy(StrEnum):
     """Whether a second pass reorders what the search retrieved."""
 
@@ -129,6 +136,38 @@ class Settings(BaseSettings):
     rerank_candidates: int = Field(default=24, gt=0, le=200)
 
     max_searches_per_turn: int = Field(default=3, gt=0, le=10)
+
+    # A question is refused before it costs anything; an answer is judged
+    # after it has already been paid for. One switch turns off both, and it
+    # exists for the evaluation suite and for debugging, not for production.
+    guardrails_enabled: bool = Field(default=True)
+
+    # The classifier layer. `llm_guard` is the default because a guardrail
+    # nobody enabled protects nobody; `none` leaves the arithmetic checks
+    # running and skips the models, which is what a machine with no weights
+    # downloaded needs.
+    guardrail_scanner: GuardrailScanner = Field(default=GuardrailScanner.LLM_GUARD)
+
+    # The injection classifier. Measured on this corpus, the model LLM Guard
+    # ships refused all three legitimate Portuguese questions at a confidence
+    # of 1.00; this one refused none of them and caught three of four attacks.
+    # See guardrails/injection.py for the table.
+    injection_model: str = Field(default="katanemolabs/Arch-Guard")
+
+    # Indirect prompt injection: a retrieved passage is read the way the
+    # system prompt is read, so a document carrying a hidden instruction
+    # attacks every question that retrieves it. Scanned at ingestion, once
+    # per chunk, because the corpus cannot change between two questions.
+    scan_corpus_for_injection: bool = Field(default=True)
+
+    # Matches the API schema's own limit, so the two boundaries agree. A
+    # question longer than this is a cost attack before it is anything else.
+    max_question_chars: int = Field(default=2000, gt=0)
+
+    # Not a hard stop: the answer already exists by the time this is known.
+    # Exceeding it is reported so a runaway agent loop is visible in the
+    # trace instead of only in the invoice.
+    max_answer_tokens: int = Field(default=8000, gt=0)
 
     knowledge_domain: str = Field(default="a documentação interna da organização", min_length=3)
     """What the knowledge base is about, in the language of the answers.

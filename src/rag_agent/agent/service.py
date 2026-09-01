@@ -15,6 +15,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from rag_agent.config import get_settings
+from rag_agent.guardrails import check_answer, check_question
 from rag_agent.observability import build_run_config, estimate_cost_usd
 from rag_agent.prompts import build_system_prompt
 from rag_agent.providers import build_chat_model
@@ -76,7 +77,16 @@ class ChatSession:
             self._session_id = session_id
 
     def send(self, question: str) -> AnswerResult:
-        """Send a question, updating the conversation history in place."""
+        """Send a question, updating the conversation history in place.
+
+        The guardrails run here rather than in the CLI or the API, so every
+        interface is covered by construction and a new one cannot forget.
+        """
+        # Before the history grows: a refused question must leave the
+        # conversation exactly as it was, or the next turn would carry a
+        # message the model never answered.
+        check_question(question)
+
         self._messages.append(HumanMessage(question))
         # Everything after this mark belongs to the current turn. Measuring
         # from here is what keeps earlier turns from being counted twice.
@@ -99,6 +109,13 @@ class ChatSession:
         produced = self._messages[turn_start:]
 
         result = _to_result(self._messages, produced, elapsed)
+        result.findings.extend(
+            check_answer(
+                result.answer,
+                total_tokens=result.metrics.total_tokens if result.metrics else 0,
+                retrieved=result.used_tools,
+            )
+        )
         logger.info(
             "ask(%r) used %d tool(s) in %.2fs, %d token(s)",
             question,

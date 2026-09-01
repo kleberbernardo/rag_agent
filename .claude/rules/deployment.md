@@ -55,8 +55,9 @@ The healthcheck is a `python -c urllib` call against `/health`.
 it machinery for running Chroma as a server, which this container never did. A
 Postgres client is a driver. That saving is a consequence, not an optimisation.
 
-**Do not add `sentence-transformers` to the image.** torch is roughly 2 GB and
-reranking is off by default. It is the `rerank` extra for that reason.
+**The image carries torch.** The guardrails need it, so it is a hard
+dependency and the runtime image is much larger than the 422 MB above. Measure
+after building rather than quoting that number.
 
 ## CI
 
@@ -99,7 +100,7 @@ Kubernetes now, and that choice belongs to whoever operates it.
 
 ## Windows
 
-`pip install -e ".[rerank]"` fails with `OSError: [Errno 2] No such file or
+`pip install -e .` fails with `OSError: [Errno 2] No such file or
 directory` on a torch header unless long path support is enabled:
 
 ```powershell

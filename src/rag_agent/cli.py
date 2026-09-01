@@ -37,6 +37,7 @@ from rag_agent.evaluation import (
     summarise,
     sync_dataset,
 )
+from rag_agent.guardrails import describe_guardrails
 from rag_agent.indexing import (
     DatabaseUnavailableError,
     count_documents,
@@ -346,6 +347,7 @@ def status() -> None:
             else ""
         )
     )
+    console.print(f"[bold]guardrails  [/] {describe_guardrails()}")
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
 
 

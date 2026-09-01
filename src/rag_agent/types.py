@@ -67,7 +67,7 @@ class RunMetrics:
         return self.input_tokens + self.output_tokens
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class AnswerResult:
     """The agent's final answer plus the reasoning trail that produced it."""
 
@@ -75,6 +75,10 @@ class AnswerResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     messages: list[Any] = field(default_factory=list)
     metrics: RunMetrics | None = None
+    # What the output guardrails noticed. Findings rather than failures: the
+    # answer already exists by the time these are known, and a correct refusal
+    # legitimately cites nothing.
+    findings: list[Any] = field(default_factory=list)
 
     @property
     def tool_names(self) -> list[str]:

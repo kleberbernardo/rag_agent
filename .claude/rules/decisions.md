@@ -106,4 +106,5 @@ was confusion. See [conventions.md](conventions.md), anti-pattern A.
 | `FUSION_POOL=5`, not 3 | At a multiplier of 3 the missing passage does not reach the top 8; at 5 it does |
 | A search budget, not a distance threshold | The ranges overlap: worst valid question 0.97, best invalid one 0.84. A threshold cannot separate them, a budget can |
 | `portuguese_unaccent`, not `portuguese` | The stock config does not fold accents: "suspensão" stems to `suspensã` and "suspensao" to `suspensa`, so a question without the accent finds nothing |
-| `sentence-transformers` as an extra, not a dependency | torch is roughly 2 GB; the image stays at 422 MB until someone opts in |
+| `katanemolabs/Arch-Guard` for injection, not LLM Guard's default | 7/8 correct with 0 false positives, against 5/8 with 3. The default refuses every Portuguese question |
+| Nothing is an optional extra any more | The guardrails need torch, so the argument for keeping the reranker optional disappeared with it |

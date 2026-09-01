@@ -131,7 +131,9 @@ which such a block is split further.
 ## Reranking
 
 Off by default, and the reason is measured. See
-[decisions.md](decisions.md#1-the-reranker-stays-off).
+[decisions.md](decisions.md#1-the-reranker-stays-off). The package is a hard
+dependency now, since the guardrails brought torch anyway; only the 2.2 GB of
+weights are deferred to first use.
 
 `Reranker` is a Protocol with one method. `PassThroughReranker` exists so that
 enabling the second pass is configuration rather than a branch at every call
@@ -140,3 +142,6 @@ holds it: loading costs seconds, scoring costs milliseconds.
 
 Adding a provider (Cohere, a reranking service over HTTP) means writing a class
 with a `rerank()` method. Nothing else changes.
+
+Ingestion also runs the injection scan. See
+[guardrails.md](guardrails.md#indirect-injection-is-the-rag-specific-risk).

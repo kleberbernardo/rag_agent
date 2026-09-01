@@ -120,10 +120,19 @@ def get_vector_store() -> PGVector:
 
 
 def index_documents(chunks: list[Document]) -> int:
-    """Embed the chunks and store them. Returns how many were indexed."""
+    """Embed the chunks and store them. Returns how many were indexed.
+
+    The chunks are scanned for hidden instructions on the way in. A retrieved
+    passage is read the way the system prompt is read, so a document carrying
+    an instruction attacks every question that retrieves it. Scanning here
+    rather than at query time is the whole saving: the corpus cannot change
+    between two questions, so the answer cannot either.
+    """
     if not chunks:
         logger.warning("Nothing to index.")
         return 0
+
+    _warn_about_injection(chunks)
 
     store = get_vector_store()
     store.add_documents(documents=chunks, ids=[_stable_id(chunk) for chunk in chunks])
@@ -277,6 +286,31 @@ def reset_index() -> None:
 def describe_location() -> str:
     """Where the index lives, for diagnostics and log messages."""
     return describe_database()
+
+
+def _warn_about_injection(chunks: list[Document]) -> None:
+    """Report chunks that look like instructions rather than like documents.
+
+    A warning and not a refusal. This corpus is regulation, and regulation
+    tells the reader what to do, so a classifier trained on jailbreaks will
+    sometimes read a genuine article as an instruction. Refusing to index
+    would silently drop the law; naming the passage lets a person look.
+    """
+    from rag_agent.guardrails import scan_chunks
+
+    flagged = scan_chunks([chunk.page_content for chunk in chunks])
+    if not flagged:
+        return
+
+    logger.warning(
+        "%d of %d chunk(s) look like instructions. Review them before trusting the index.",
+        len(flagged),
+        len(chunks),
+    )
+    for index, verdict in flagged.items():
+        source = chunks[index].metadata.get("source", "desconhecida")
+        excerpt = chunks[index].page_content[:80].replace("\n", " ")
+        logger.warning("  %s (%s, %.2f): %s", source, verdict.label, verdict.score, excerpt)
 
 
 def _stable_id(chunk: Document) -> str:
