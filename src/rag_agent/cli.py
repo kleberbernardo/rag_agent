@@ -40,8 +40,10 @@ from rag_agent.evaluation import (
 from rag_agent.indexing import (
     DatabaseUnavailableError,
     count_documents,
+    delete_source,
     describe_location,
     index_documents,
+    list_sources,
     load_documents,
     reranking_enabled,
     reset_index,
@@ -111,6 +113,12 @@ MinScoreOption = typer.Option(
 HostOption = typer.Option("127.0.0.1", "--host", help="Endereço de escuta.")
 PortOption = typer.Option(8080, "--port", "-p", help="Porta.")
 ReloadOption = typer.Option(False, "--reload", help="Reinicia ao salvar arquivo (desenvolvimento).")
+RemoveOption = typer.Option(
+    None,
+    "--remove",
+    help="Remove do índice todos os pedaços deste documento. Use o nome exato do arquivo.",
+)
+YesOption = typer.Option(False, "--yes", "-y", help="Não pede confirmação.")
 ResetOption = typer.Option(
     False, "--reset", help="Apaga o índice antes de indexar. Use ao trocar de estratégia."
 )
@@ -339,6 +347,65 @@ def status() -> None:
         )
     )
     console.print(f"[bold]indexado    [/] [{'green' if total else 'yellow'}]{total} pedaço(s)")
+
+
+@app.command()
+def sources(source: str = RemoveOption, yes: bool = YesOption) -> None:
+    """Lista os documentos indexados, ou remove um deles do índice."""
+    if source is None:
+        _print_sources()
+        return
+
+    _remove_source(source, confirmed=yes)
+
+
+def _print_sources() -> None:
+    """Show what is indexed, grouped by the document it came from."""
+    indexed = list_sources()
+
+    if not indexed:
+        console.print("[yellow]O índice está vazio. Rode: rag ingest[/]")
+        return
+
+    table = Table(title="documentos indexados", border_style="cyan")
+    table.add_column("documento", style="bold")
+    table.add_column("pedaços", justify="right")
+
+    for entry in indexed:
+        table.add_row(entry.name or "[sem origem]", str(entry.chunks))
+
+    console.print(table)
+    console.print(
+        f"\n{len(indexed)} documento(s), {sum(entry.chunks for entry in indexed)} pedaço(s)"
+    )
+
+
+def _remove_source(source: str, *, confirmed: bool) -> None:
+    """Remove one document, after saying exactly what will disappear.
+
+    Re-ingesting overwrites a chunk whose text is unchanged, so it cannot undo
+    a removal by itself: a document taken out of the index comes back only if
+    its file is still in data/ and ingestion runs again.
+    """
+    known = {entry.name: entry.chunks for entry in list_sources()}
+
+    if source not in known:
+        console.print(f"[red]'{source}' não está indexado.[/]")
+        if known:
+            console.print("\nIndexados no momento:")
+            for name in known:
+                console.print(f"  {name}")
+        raise typer.Exit(code=1)
+
+    if not confirmed:
+        confirmed = typer.confirm(f"Remover {known[source]} pedaço(s) de '{source}'?")
+
+    if not confirmed:
+        console.print("Cancelado.")
+        return
+
+    removed = delete_source(source)
+    console.print(f"[green]Removido:[/] {removed} pedaço(s) de '{source}'")
 
 
 @app.command(name="eval")

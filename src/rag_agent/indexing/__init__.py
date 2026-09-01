@@ -21,10 +21,13 @@ from rag_agent.indexing.reranker import (
 )
 from rag_agent.indexing.splitter import split_documents
 from rag_agent.indexing.vector_store import (
+    IndexedSource,
     count_documents,
+    delete_source,
     describe_location,
     get_vector_store,
     index_documents,
+    list_sources,
     reset_index,
     search,
 )
@@ -32,9 +35,11 @@ from rag_agent.indexing.vector_store import (
 __all__ = [
     "SUPPORTED_SUFFIXES",
     "DatabaseUnavailableError",
+    "IndexedSource",
     "Reranker",
     "RerankerUnavailableError",
     "count_documents",
+    "delete_source",
     "describe_database",
     "describe_location",
     "ensure_extensions",
@@ -47,6 +52,7 @@ __all__ = [
     "get_vector_store",
     "index_documents",
     "keyword_search",
+    "list_sources",
     "load_documents",
     "reranking_enabled",
     "reset_index",

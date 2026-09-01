@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import dataclass
 
 from langchain_core.documents import Document
 from langchain_postgres import PGVector
@@ -36,14 +37,26 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DatabaseUnavailableError",
+    "IndexedSource",
     "RerankerUnavailableError",
     "count_documents",
+    "delete_source",
     "describe_location",
     "get_vector_store",
     "index_documents",
+    "list_sources",
     "reset_index",
     "search",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class IndexedSource:
+    """One source document, and how much of the index it occupies."""
+
+    name: str
+    chunks: int
+
 
 _COUNT = text(
     f"""
@@ -52,6 +65,31 @@ _COUNT = text(
     JOIN {COLLECTION_TABLE} AS collection
       ON embedding.collection_id = collection.uuid
     WHERE collection.name = :collection
+    """
+)
+
+# The source is the file the chunk came from, written into the metadata by the
+# loader. Grouping by it is what turns "590 chunks" into something a person can
+# act on.
+_LIST_SOURCES = text(
+    f"""
+    SELECT embedding.cmetadata ->> 'source' AS source, count(*) AS chunks
+    FROM {EMBEDDING_TABLE} AS embedding
+    JOIN {COLLECTION_TABLE} AS collection
+      ON embedding.collection_id = collection.uuid
+    WHERE collection.name = :collection
+    GROUP BY source
+    ORDER BY source
+    """
+)
+
+_DELETE_SOURCE = text(
+    f"""
+    DELETE FROM {EMBEDDING_TABLE} AS embedding
+    USING {COLLECTION_TABLE} AS collection
+    WHERE embedding.collection_id = collection.uuid
+      AND collection.name = :collection
+      AND embedding.cmetadata ->> 'source' = :source
     """
 )
 
@@ -181,6 +219,47 @@ def count_documents() -> int:
             return 0
 
     return int(total or 0)
+
+
+def list_sources() -> list[IndexedSource]:
+    """Every source document currently indexed, with its chunk count.
+
+    Removing a document requires naming it exactly, and the name is the file
+    name the loader recorded, not the path it was read from.
+    """
+    verify_connection()
+
+    with get_engine().connect() as connection:
+        try:
+            rows = connection.execute(
+                _LIST_SOURCES, {"collection": get_settings().collection_name}
+            ).all()
+        except Exception:
+            return []
+
+    return [IndexedSource(name=row[0] or "", chunks=row[1]) for row in rows]
+
+
+def delete_source(source: str) -> int:
+    """Remove every chunk that came from one document. Returns how many.
+
+    Re-ingesting overwrites a chunk whose text is unchanged, but it cannot
+    remove one that no longer exists: a revoked document, or a paragraph
+    deleted from a revision, would otherwise stay in the index and keep being
+    retrieved against questions it no longer answers.
+    """
+    verify_connection()
+
+    with get_engine().begin() as connection:
+        result = connection.execute(
+            _DELETE_SOURCE,
+            {"collection": get_settings().collection_name, "source": source},
+        )
+
+    removed = result.rowcount or 0
+    logger.info("Removed %d chunk(s) of %s from %s", removed, source, describe_location())
+
+    return removed
 
 
 def reset_index() -> None:
