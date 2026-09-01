@@ -52,6 +52,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "COLLECTION_NAME",
         "DATABASE_URL",
         "DATABASE_POOL_SIZE",
+        "DATABASE_CONNECT_TIMEOUT",
         "DATABASE_MAX_OVERFLOW",
         "EMBEDDING_DIMENSIONS",
         "KNOWLEDGE_DOMAIN",
@@ -66,6 +67,8 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         "REDIS_URL",
         "SESSION_TTL_SECONDS",
         "API_KEY",
+        "RATE_LIMIT",
+        "API_WORKERS",
         "MAX_RETRIES",
         "REQUEST_TIMEOUT_SECONDS",
     ):
@@ -79,19 +82,21 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
 
 
 def _forget_caches() -> None:
-    """Drop what is built from the settings and would outlive them.
+    """Drop what is built from the settings and is cheap to build again.
 
-    The reranker is held for the life of the process because loading a model
-    is measured in seconds. That is right in production and wrong in a suite,
-    where the first test to build one would decide for every test after it.
+    **The model caches are deliberately not dropped here.** Clearing them
+    between tests means every test that reaches a guardrail reloads weights,
+    and the suite went from two minutes to nine when this file did that. A
+    test that changes `INJECTION_MODEL` or `GUARDRAIL_SCANNER` clears the one
+    it needs itself; the rest inherit a loaded model, which is what production
+    does anyway.
+
+    The reranker stays here because building it is a constructor call with no
+    weights in it: the model loads on first use, not on selection.
     """
-    from rag_agent.guardrails.injection import forget_classifier
-    from rag_agent.guardrails.scanners import forget_scanners
     from rag_agent.indexing.reranker import forget_reranker
 
     forget_reranker()
-    forget_scanners()
-    forget_classifier()
 
 
 @pytest.fixture

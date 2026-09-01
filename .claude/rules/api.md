@@ -7,6 +7,7 @@
 | Method | Path | Tag |
 |---|---|---|
 | GET | `/health` | ops |
+| GET | `/ready` | ops |
 | GET | `/status` | ops |
 | POST | `/ask` | agent |
 | POST | `/chat` | agent |
@@ -23,7 +24,8 @@ a message naming what to do:
 | Situation | Response |
 |---|---|
 | Empty index | `503` naming the ingestion step |
-| Postgres unreachable | `503` naming the address it tried, password removed |
+| Postgres unreachable | `/ready` gives `503`; `/health` stays `200` |
+| Past the rate limit | `429` with `Retry-After` and `reason: rate_limit` |
 | Malformed body | `422` from the schema |
 | Missing or wrong API key | `401`, when `API_KEY` is set |
 | Unknown session on delete | `404` |
@@ -79,13 +81,46 @@ in the message history, it will not survive a round trip through Redis.
 `SESSION_TTL_SECONDS` expires idle conversations. The in-memory store evicts
 the oldest instead.
 
+## The two probes
+
+**`/health` is liveness and checks nothing else. `/ready` is readiness and
+checks the database and the index.**
+
+They were one endpoint, and it checked the database. That is readiness wearing
+a liveness name: an orchestrator restarts a process whose liveness probe
+fails, so a database blinking would have restarted every replica at once. A
+failed readiness probe removes the instance from rotation and leaves it
+running, which is the correct response to a dependency that is briefly away.
+
+The container healthcheck points at `/ready`, because Compose's
+`service_healthy` means "ready for traffic".
+
+## Rate limiting
+
+A moving window per caller, `RATE_LIMIT` (default `60/minute`, empty
+disables). Fixed windows let a caller spend the whole budget in the last
+second of one minute and again in the first second of the next.
+
+**Not slowapi.** Its two middlewares locate the route by walking `app.routes`
+for something with an `.endpoint`, and current FastAPI wraps everything from
+`include_router` in an `_IncludedRouter` that has none. Every request looks
+like an unidentifiable route, which it treats as exempt, so nothing is limited
+and the limiter still reports itself enabled. `limits`, the library underneath
+slowapi, is used directly.
+
+`EXEMPT_PATHS` covers the probes and the docs. A balancer polling readiness
+every two seconds would exhaust a per-minute budget on its own.
+
+The storage is per process, so N replicas enforce the ceiling N times over.
+`limits` also speaks Redis, and the compose file already has one: that is a
+constructor argument, not a rewrite.
+
 ## Not there yet
 
-Deliberately absent, and worth knowing before claiming the API is
-production ready:
+Deliberately absent, and worth knowing before claiming the API is production
+ready:
 
-- No rate limiting
 - No CORS configuration
-- Single Uvicorn process, no `--workers`
-- `/health` exists, but there is no separate readiness probe
 - No per-tenant isolation or permission-aware retrieval
+- Rate limit storage is per process, not shared across replicas
+- The answer is not scanned for PII, only the question

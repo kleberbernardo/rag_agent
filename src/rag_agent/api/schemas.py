@@ -97,9 +97,26 @@ class FeedbackResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Liveness plus the one thing that makes the service useless when wrong."""
+    """Liveness: whether this process is answering at all.
+
+    Deliberately free of dependency checks. A liveness probe that fails when
+    the database blinks tells the orchestrator to restart a process that was
+    never broken, and a restart loop is how one database problem becomes an
+    outage.
+    """
 
     status: str
+
+
+class ReadinessResponse(BaseModel):
+    """Readiness: whether this process can serve a real question.
+
+    A failure here takes the instance out of rotation and leaves it running,
+    which is the correct answer to a dependency that is briefly away.
+    """
+
+    status: str
+    database: str
     indexed_chunks: int
     vector_store: str
 

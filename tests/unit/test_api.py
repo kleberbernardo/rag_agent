@@ -86,38 +86,31 @@ def client(indexed: None) -> Iterator[TestClient]:
         yield test_client
 
 
-class TestHealth:
-    def test_reports_ok_with_a_populated_index(self, client: TestClient) -> None:
+class TestProbes:
+    """The two probes and what each one is allowed to know.
+
+    They were one endpoint once, and it checked the database. That is
+    readiness wearing a liveness name: a dependency blinking would have told
+    the orchestrator to restart every replica. The split is covered in full by
+    test_operability.py; what is here is that both exist and answer.
+    """
+
+    def test_liveness_says_only_that_the_process_answers(self, client: TestClient) -> None:
         body = client.get("/health").json()
 
-        assert body["status"] == "ok"
+        assert body == {"status": "ok"}
+
+    def test_readiness_reports_the_index(self, client: TestClient) -> None:
+        body = client.get("/ready").json()
+
+        assert body["status"] == "ready"
         assert body["indexed_chunks"] == 590
 
-    def test_says_so_when_the_index_is_empty(self, empty_index: None) -> None:
-        """A healthy service over an empty index would be lying by omission."""
-        with TestClient(create_app()) as unindexed:
-            body = unindexed.get("/health").json()
-
-        assert body["status"] == "empty index"
-        assert body["indexed_chunks"] == 0
-
-    def test_reports_503_when_the_store_is_unreachable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from rag_agent.api import routes
-        from rag_agent.indexing import DatabaseUnavailableError
-
-        def unreachable() -> int:
-            msg = "Não foi possível conectar ao Postgres em db:5432."
-            raise DatabaseUnavailableError(msg)
-
-        monkeypatch.setattr(routes, "count_documents", unreachable)
-
-        with TestClient(create_app(), raise_server_exceptions=False) as broken:
-            response = broken.get("/health")
-
-        assert response.status_code == 503
-        assert "db:5432" in response.json()["detail"]
+    def test_an_empty_index_is_live_but_not_ready(self, empty_index: None) -> None:
+        """It answers "não encontrei" to everything, however healthy it is."""
+        with TestClient(create_app(), raise_server_exceptions=False) as unindexed:
+            assert unindexed.get("/health").status_code == 200
+            assert unindexed.get("/ready").status_code == 503
 
 
 class TestStatus:

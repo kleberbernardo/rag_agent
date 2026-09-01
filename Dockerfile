@@ -43,13 +43,20 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY --chown=rag:rag data/ ./data/
+# The migrations travel with the image, so the same artefact that serves
+# traffic is the one that prepares the database.
+COPY --chown=rag:rag alembic.ini ./
+COPY --chown=rag:rag migrations/ ./migrations/
 RUN mkdir -p /app/logs && chown -R rag:rag /app
 
 USER rag
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"
+# Readiness, not liveness. Compose's service_healthy means "ready for
+# traffic", and /health answers 200 whenever the process is up, including
+# when the database is away or the index is empty.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/ready').status==200 else 1)"
 
 # The image serves the API by default. The CLI is still one word away:
 #   docker compose run --rm api ask "..."

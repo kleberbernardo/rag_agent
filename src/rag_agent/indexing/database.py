@@ -52,6 +52,11 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
+        # Fail fast rather than waiting on the operating system. An address
+        # that never answers takes over two minutes to give up on by default,
+        # which is longer than any caller is willing to wait and long enough
+        # for a readiness probe to hang instead of reporting not ready.
+        connect_args={"connect_timeout": settings.database_connect_timeout},
     )
 
 
@@ -79,50 +84,36 @@ def verify_connection() -> None:
         raise DatabaseUnavailableError(msg) from error
 
 
-def ensure_extensions() -> None:
-    """Install the extensions the retrieval layer needs.
+class SchemaOutOfDateError(RuntimeError):
+    """The database is reachable but has not had the migrations applied."""
 
-    `vector` stores the embeddings and `unaccent` feeds the text search
-    configuration below. Both are idempotent, so this runs on every startup
-    rather than living in a migration nobody remembers to apply.
+
+def verify_schema() -> None:
+    """Fail early when the migrations have not been applied, and name the command.
+
+    Applying migrations from inside the application was the previous design and
+    it is an anti-pattern at more than one replica: several processes starting
+    together race to create the same objects, and a long migration blocks every
+    boot rather than one deployment step. Alembic owns the schema now, and this
+    only checks that it ran.
+
+    The text search configuration is the marker because it is the object this
+    project owns that nothing else creates.
     """
-    statements = (
-        "CREATE EXTENSION IF NOT EXISTS vector",
-        "CREATE EXTENSION IF NOT EXISTS unaccent",
-    )
-
-    with get_engine().begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
-
-        _ensure_text_search_config(connection)
-
-
-def _ensure_text_search_config(connection: object) -> None:
-    """Create the accent-folding Portuguese configuration, once.
-
-    CREATE TEXT SEARCH CONFIGURATION has no IF NOT EXISTS, so existence is
-    checked first rather than swallowing the duplicate-object error.
-    """
-    exists = connection.execute(  # type: ignore[attr-defined]
-        text("SELECT 1 FROM pg_ts_config WHERE cfgname = :name"),
-        {"name": TEXT_SEARCH_CONFIG},
-    ).first()
+    with get_engine().connect() as connection:
+        exists = connection.execute(
+            text("SELECT 1 FROM pg_ts_config WHERE cfgname = :name"),
+            {"name": TEXT_SEARCH_CONFIG},
+        ).first()
 
     if exists:
         return
 
-    connection.execute(  # type: ignore[attr-defined]
-        text(f"CREATE TEXT SEARCH CONFIGURATION {TEXT_SEARCH_CONFIG} (COPY = portuguese)")
+    msg = (
+        f"O banco em {describe_database()} não tem as migrações aplicadas. "
+        f"Rode: alembic upgrade head"
     )
-    connection.execute(  # type: ignore[attr-defined]
-        text(
-            f"ALTER TEXT SEARCH CONFIGURATION {TEXT_SEARCH_CONFIG} "
-            f"ALTER MAPPING FOR hword, hword_part, word "
-            f"WITH unaccent, portuguese_stem"
-        )
-    )
-    logger.info("Created the text search configuration %s", TEXT_SEARCH_CONFIG)
+    raise SchemaOutOfDateError(msg)
 
 
 def ensure_search_indexes() -> None:

@@ -39,7 +39,7 @@ stop.
 | [.claude/rules/conventions.md](.claude/rules/conventions.md) | **Always.** Two anti-patterns the owner named explicitly |
 | [.claude/rules/architecture.md](.claude/rules/architecture.md) | Touching more than one package |
 | [.claude/rules/indexing.md](.claude/rules/indexing.md) | Anything about retrieval, chunking or fusion |
-| [.claude/rules/database.md](.claude/rules/database.md) | Anything that writes SQL or touches the schema |
+| [.claude/rules/database.md](.claude/rules/database.md) | Anything that writes SQL, touches the schema, or needs a migration |
 | [.claude/rules/agent.md](.claude/rules/agent.md) | The graph, the tools, or the search budget |
 | [.claude/rules/guardrails.md](.claude/rules/guardrails.md) | Anything refused, scanned or flagged |
 | [.claude/rules/evaluation.md](.claude/rules/evaluation.md) | Metrics, dataset, the judge |
@@ -79,6 +79,7 @@ rag chat              # conversation with memory
 rag status            # active configuration and chunk count
 rag eval              # grade against 29 questions, ~2 min, ~US$0.02
 rag serve             # FastAPI on :8080, docs at /docs
+alembic upgrade head  # prepare a database; the application never does this itself
 rag prompt push       # publish the four prompt templates to Langfuse
 rag dataset push      # upload the evaluation dataset to Langfuse
 ```
@@ -149,5 +150,5 @@ Do not present these as solved:
 | `cli.py` is 634 lines at 0% coverage | Largest file. Split before adding a command |
 | No permission-aware retrieval | Anyone who can ask can retrieve any chunk |
 | `splitter.py` at 52% coverage | The article-splitting paths are under-tested |
-| No rate limiting, CORS, or Uvicorn workers | See [api.md](.claude/rules/api.md) |
+| No CORS, and the rate limit is per process | See [api.md](.claude/rules/api.md) |
 | `OPENAI_API_KEY` is not a GitHub secret | `evaluation.yml` silently skips |

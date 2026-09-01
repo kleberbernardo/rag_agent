@@ -14,8 +14,15 @@ from rag_agent.indexing import database
 
 
 @pytest.fixture(autouse=True)
-def fresh_engine() -> None:
-    """No pool survives between tests, since each one repoints the URL."""
+def fresh_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No pool survives between tests, since each one repoints the URL.
+
+    The connect timeout is dropped to a second. Five is the right production
+    default and it is five seconds of waiting per test for a connection that
+    is never going to happen; what these tests check is the message, not how
+    patient the driver is.
+    """
+    monkeypatch.setenv("DATABASE_CONNECT_TIMEOUT", "1")
     database.forget_engine()
 
 

@@ -2,12 +2,13 @@
 
 from rag_agent.indexing.database import (
     DatabaseUnavailableError,
+    SchemaOutOfDateError,
     describe_database,
-    ensure_extensions,
     ensure_search_indexes,
     forget_engine,
     get_engine,
     verify_connection,
+    verify_schema,
 )
 from rag_agent.indexing.hybrid import fuse, tokenise
 from rag_agent.indexing.keyword import keyword_search
@@ -38,11 +39,11 @@ __all__ = [
     "IndexedSource",
     "Reranker",
     "RerankerUnavailableError",
+    "SchemaOutOfDateError",
     "count_documents",
     "delete_source",
     "describe_database",
     "describe_location",
-    "ensure_extensions",
     "ensure_search_indexes",
     "forget_engine",
     "forget_reranker",
@@ -60,4 +61,5 @@ __all__ = [
     "split_documents",
     "tokenise",
     "verify_connection",
+    "verify_schema",
 ]

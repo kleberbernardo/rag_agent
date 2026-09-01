@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from rag_agent import __version__
 from rag_agent.api.feedback import FeedbackStore
+from rag_agent.api.limits import RateLimitMiddleware
 from rag_agent.api.routes import router
 from rag_agent.api.security import require_api_key
 from rag_agent.api.sessions import InMemorySessionStore, RedisSessionStore, SessionStore
@@ -99,6 +100,10 @@ def create_app() -> FastAPI:
     app.include_router(router, dependencies=[Depends(require_api_key)])
 
     app.add_exception_handler(GuardrailViolation, _refused)
+
+    # A no-op when RATE_LIMIT is empty, which is what keeps `rag serve` on a
+    # laptop from refusing the eleventh question of an afternoon.
+    app.add_middleware(RateLimitMiddleware)
 
     logger.info("API ready for domain: %s", settings.knowledge_domain)
     return app

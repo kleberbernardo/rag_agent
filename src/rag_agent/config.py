@@ -188,6 +188,12 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://rag:rag@localhost:5432/rag",
         min_length=1,
     )
+    # Seconds to wait for a connection before giving up. Without it the
+    # driver waits on the operating system, which on an address that never
+    # answers is over two minutes: long enough for a readiness probe to hang
+    # instead of failing, and for the caller's own timeout to fire first.
+    database_connect_timeout: int = Field(default=5, gt=0, le=60)
+
     database_pool_size: int = Field(default=5, gt=0, le=100)
     database_max_overflow: int = Field(default=10, ge=0, le=100)
     collection_name: str = Field(default="rag_agent_docs")
@@ -201,6 +207,17 @@ class Settings(BaseSettings):
     session_backend: SessionBackend = Field(default=SessionBackend.MEMORY)
     redis_url: str = Field(default="redis://localhost:6379/0")
     session_ttl_seconds: int = Field(default=3600, gt=0)
+
+    # A ceiling per caller, in the syntax the limiter understands
+    # ("60/minute", "1000/hour"). Empty disables it, which is what keeps a
+    # laptop from refusing the eleventh question of an afternoon. Without it,
+    # one client in a retry loop spends the model budget.
+    rate_limit: str = Field(default="60/minute")
+
+    # Uvicorn processes. One request that takes eight seconds blocks every
+    # other request for those eight seconds in a single process. Ignored
+    # together with --reload, which needs one process to re-import into.
+    api_workers: int = Field(default=1, gt=0, le=32)
 
     # Empty means the API is open. Set it and every request needs the header.
     api_key: SecretStr = Field(default=SecretStr(""))

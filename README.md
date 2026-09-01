@@ -258,7 +258,7 @@ Nine commands. Three of them are what you use daily.
 | `rag status` | The active configuration and how many chunks are indexed. | |
 | `rag sources` | List the indexed documents, or drop one of them from the index. | `--remove <file>`, `--yes` |
 | `rag eval` | Grade the agent against the 29 questions. | See the table below |
-| `rag serve` | Start the HTTP API. | `--host`, `--port`, `--reload`, `-v` |
+| `rag serve` | Start the HTTP API. | `--host`, `--port`, `--workers`, `--reload`, `-v` |
 | `rag prompt show` \| `push` | Read the prompt in force; publish the local ones. | `--message`, `-v` |
 | `rag dataset push` | Upload the evaluation dataset to Langfuse. | `--dataset`, `-v` |
 
@@ -468,6 +468,8 @@ message rather than failing mid-query.
 | `RERANK_STRATEGY` | `none` | `cross_encoder` adds a second pass that reorders what was retrieved. Needs the `rerank` extra. |
 | `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | The cross-encoder to load. Multilingual, open source, runs locally. |
 | `RERANK_CANDIDATES` | `24` | How many candidates the reranker reads. Every one is a model pass, so this is the latency knob. |
+| `RATE_LIMIT` | `60/minute` | Ceiling per caller. Empty disables it. |
+| `API_WORKERS` | `1` | Uvicorn processes. One serialises every request. |
 | `RETRIEVAL_K` | `8` | Passages retrieved per question. |
 | `MAX_SEARCHES_PER_TURN` | `3` | How many times the agent may search one question. |
 | `KNOWLEDGE_DOMAIN` | generic | What the corpus is about. Injected into the system prompt and the search tool description. |
@@ -800,7 +802,8 @@ and to the embeddings.
 | Situation | Response |
 |---|---|
 | Empty index | `503` naming the ingestion step |
-| Postgres unreachable | `503` naming the address it tried, password removed |
+| Postgres unreachable | `/ready` answers `503`; `/health` stays `200` |
+| Past the rate limit | `429` with `Retry-After` |
 | Malformed body | `422` from the schema |
 | Missing or wrong API key | `401`, when `API_KEY` is set |
 | Unknown session on delete | `404` |
@@ -1260,6 +1263,74 @@ copy.
 **What that number is worth:** the five deterministic metrics are reproducible,
 so 100% there means 100% again tomorrow. `faithfulness` is graded by a model
 and drifts; one run at 100% is not a guarantee of the next.
+
+### Probes, limits and workers
+
+| Endpoint | Answers | Checks |
+|---|---|---|
+| `GET /health` | liveness | nothing else |
+| `GET /ready` | readiness | database reachable, index populated |
+
+**They were one endpoint once, and it checked the database.** That is
+readiness wearing a liveness name: an orchestrator restarts a process whose
+liveness probe fails, so a database blinking would have restarted every
+replica at once, and that is how one database problem becomes an outage. A
+failed readiness probe takes the instance out of rotation and leaves it
+running, which is the right answer to a dependency that is briefly away.
+
+The container healthcheck points at `/ready`, because Compose's
+`service_healthy` means "ready for traffic".
+
+**Rate limiting** is a moving window per caller: `60/minute` by default, empty
+to disable. A caller is its API key when there is one and its address when
+there is not, and the key is hashed before it becomes a storage key. Every
+answer carries `X-RateLimit-Remaining`, so a client slows down before being
+refused rather than after. The probes are never limited: a balancer polling
+readiness every two seconds would exhaust a per-minute budget on its own.
+
+> **Not slowapi.** It is the usual answer for FastAPI and it does not work
+> here. Both of its middlewares find the route by walking `app.routes` for
+> something with an `.endpoint`, and current FastAPI wraps everything from
+> `include_router` in an `_IncludedRouter` that has none. Every request looks
+> like a route it cannot identify, which it treats as exempt. The failure is
+> silent: the limiter reports itself enabled and the ceiling never fires. What
+> is used instead is `limits`, the library slowapi is built on.
+
+**Workers**: `rag serve --workers 4`, or `API_WORKERS`. One process serialises
+requests, so a question that takes eight seconds blocks every other question
+for those eight seconds. `--reload` needs a single process and wins over
+`--workers`, which the command says rather than silently ignoring one.
+
+### Schema migrations
+
+Alembic owns the extensions and the `portuguese_unaccent` text search
+configuration. The tables belong to langchain-postgres, which creates them on
+first write, and the two search indexes are built after that because they
+cannot exist before the table does.
+
+```bash
+alembic upgrade head      # prepare a database
+alembic revision -m "..."  # start a change
+alembic downgrade -1       # undo the last one
+```
+
+The URL is not in `alembic.ini`. `migrations/env.py` reads `DATABASE_URL`
+through the same settings object the application uses, so there is one place
+that knows where the database is and no credential in a tracked file.
+
+**The application does not apply migrations.** It used to, and that is an
+anti-pattern past one replica: several processes starting together race to
+create the same objects, and a long migration blocks every boot rather than
+one deployment step. What the application does now is check, and fail naming
+the command:
+
+```
+O banco em postgresql+psycopg://rag:***@localhost:5432/rag não tem as
+migrações aplicadas. Rode: alembic upgrade head
+```
+
+In Compose a one-shot `migrate` service runs first and the API waits on
+`service_completed_successfully`.
 
 ### Guardrails
 

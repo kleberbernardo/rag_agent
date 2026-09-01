@@ -31,23 +31,35 @@ langchain-postgres owns two tables, named as constants in `database.py`:
 Every raw statement in the project lives in `database.py` and `keyword.py`, so
 an upgrade that renames those tables breaks in one place.
 
-## Bootstrap, and why it runs at query time
+## Alembic owns the schema
 
-`ensure_extensions()` runs from `get_vector_store()`. Everything it does is
-idempotent, and doing it there means a fresh database becomes usable by being
-pointed at rather than by remembering a setup command.
+| Owner | What | When |
+|---|---|---|
+| **Alembic** | `vector`, `unaccent`, the `portuguese_unaccent` configuration | `alembic upgrade head` |
+| **langchain-postgres** | `langchain_pg_collection`, `langchain_pg_embedding` | First write |
+| **The application** | The GIN and HNSW indexes | After the first write |
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE TEXT SEARCH CONFIGURATION portuguese_unaccent (COPY = portuguese);
-ALTER TEXT SEARCH CONFIGURATION portuguese_unaccent
-  ALTER MAPPING FOR hword, hword_part, word WITH unaccent, portuguese_stem;
+The split is not arbitrary: an index cannot be created before the table it is
+on, and that table belongs to a library that creates it on demand.
+
+```bash
+alembic upgrade head        # prepare a database
+alembic revision -m "..."   # start a change
+alembic downgrade -1        # undo the last one
 ```
 
-`CREATE TEXT SEARCH CONFIGURATION` has no `IF NOT EXISTS`, so existence is
-checked against `pg_ts_config` first rather than swallowing a duplicate-object
-error.
+`migrations/env.py` reads `DATABASE_URL` through the settings object, so
+`alembic.ini` holds a placeholder and no credential is ever in a tracked file.
+
+**The application does not apply migrations.** It did once, and that is an
+anti-pattern past one replica: processes starting together race to create the
+same objects, and a long migration blocks every boot instead of one deployment
+step. `verify_schema()` checks and fails naming the command; the compose file
+runs a one-shot `migrate` service that the API waits on with
+`service_completed_successfully`.
+
+The marker for "migrations applied" is the text search configuration, because
+it is the object this project owns that nothing else creates.
 
 ## portuguese_unaccent is not optional
 
@@ -82,11 +94,20 @@ never user input.
 what turns the column into a fixed-size vector, which is what HNSW can be built
 on. `text-embedding-3-small` is 1536, `text-embedding-3-large` is 3072.
 
-## Known gap
+## Removing one document
 
-**There is no per-document delete.** Only `reset_index()`, which drops the
-whole collection. Removing one source document from the index is not possible
-today. This is a real hole for any real deployment and is on the backlog.
+`delete_source(name)` matches on `cmetadata->>'source'`, the file name the
+loader recorded, and is idempotent: removing what is not there returns zero
+rather than raising. `list_sources()` groups the index by document, which is
+what makes the name available to type.
+
+Re-ingesting overwrites a chunk whose text is unchanged, so it cannot undo a
+deletion. A document taken out comes back only if its file is still in `data/`
+and ingestion runs again.
+
+There is deliberately no HTTP route for it: deleting is destructive and the
+API has one key with no roles, so exposing it would turn a leaked key into a
+lost index.
 
 ## Testing against it
 

@@ -44,6 +44,23 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # One shot: applies the migrations and exits. The API waits for it to finish
+  # successfully, which is what keeps several replicas from racing to create
+  # the same objects at startup. Applying migrations from inside the
+  # application is the anti-pattern this replaces.
+  migrate:
+    build: .
+    image: rag-agent:local
+    container_name: rag-agent-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-nao-usado-para-migrar}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+
   api:
     build: .
     image: rag-agent:local
@@ -55,6 +72,9 @@ services:
         # Without service_healthy the application would start before Postgres
         # accepts connections and fail on the first command.
         condition: service_healthy
+      migrate:
+        # And without this it would start before the schema exists.
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     environment:
@@ -69,6 +89,9 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      # One process serialises requests; a slow question blocks the rest.
+      API_WORKERS: ${API_WORKERS:-4}
+      RATE_LIMIT: ${RATE_LIMIT:-60/minute}
     volumes:
       # Read-only: the corpus is an input. Swapping documents needs no rebuild.
       - ./data:/app/data:ro

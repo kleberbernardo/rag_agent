@@ -22,10 +22,10 @@ from rag_agent.indexing.database import (
     EMBEDDING_TABLE,
     DatabaseUnavailableError,
     describe_database,
-    ensure_extensions,
     ensure_search_indexes,
     get_engine,
     verify_connection,
+    verify_schema,
 )
 from rag_agent.indexing.hybrid import FUSION_POOL, fuse, identity
 from rag_agent.indexing.keyword import keyword_search
@@ -97,14 +97,14 @@ _DELETE_SOURCE = text(
 def get_vector_store() -> PGVector:
     """Open the vector store described by the current settings.
 
-    The extensions and the text search configuration are ensured on the way
-    in. They are idempotent, and doing it here means a fresh database becomes
-    usable by being pointed at, rather than by remembering a setup command.
+    The connection and the schema are checked on the way in, so a database
+    that is away or a migration that was never applied fails with a message
+    naming the command instead of a driver error thrown from somewhere deeper.
     """
     settings = get_settings()
 
     verify_connection()
-    ensure_extensions()
+    verify_schema()
 
     return PGVector(
         embeddings=build_embeddings(),

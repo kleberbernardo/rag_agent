@@ -23,6 +23,7 @@ from rag_agent.api.schemas import (
     FeedbackRequest,
     FeedbackResponse,
     HealthResponse,
+    ReadinessResponse,
     StatusResponse,
 )
 from rag_agent.api.sessions import RedisSessionStore, SessionStore
@@ -58,10 +59,26 @@ SessionsDep = Annotated[SessionStore, Depends(get_sessions)]
 
 @router.get("/health", response_model=HealthResponse, tags=["ops"])
 def health() -> HealthResponse:
-    """Liveness, plus whether there is anything to search.
+    """Liveness. Answers 200 whenever this process is answering at all.
 
-    An empty index answers every question with "não encontrei", so a service
-    that reports healthy without saying so is lying by omission.
+    It checks nothing else on purpose. A liveness probe that fails when the
+    database blinks tells the orchestrator to restart a process that was never
+    broken, and every replica restarting at once is how one database problem
+    becomes an outage. Use /ready to decide whether to send traffic.
+    """
+    return HealthResponse(status="ok")
+
+
+@router.get("/ready", response_model=ReadinessResponse, tags=["ops"])
+def ready() -> ReadinessResponse:
+    """Readiness. Whether this process can answer a real question.
+
+    Two things have to be true: the database answers, and something is
+    indexed. An empty index replies "não encontrei" to everything, so an
+    instance in that state is not ready however healthy the process is.
+
+    A 503 here takes the instance out of rotation and leaves it running, which
+    is the right answer to a dependency that is briefly away.
     """
     try:
         indexed = count_documents()
@@ -71,8 +88,15 @@ def health() -> HealthResponse:
             detail=str(error),
         ) from error
 
-    return HealthResponse(
-        status="ok" if indexed else "empty index",
+    if not indexed:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="O índice está vazio. Rode: rag ingest",
+        )
+
+    return ReadinessResponse(
+        status="ready",
+        database="ok",
         indexed_chunks=indexed,
         vector_store=describe_location(),
     )

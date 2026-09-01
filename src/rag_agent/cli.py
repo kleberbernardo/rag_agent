@@ -114,6 +114,9 @@ MinScoreOption = typer.Option(
 HostOption = typer.Option("127.0.0.1", "--host", help="Endereço de escuta.")
 PortOption = typer.Option(8080, "--port", "-p", help="Porta.")
 ReloadOption = typer.Option(False, "--reload", help="Reinicia ao salvar arquivo (desenvolvimento).")
+WorkersOption = typer.Option(
+    0, "--workers", "-w", min=0, help="Processos. 0 usa API_WORKERS. Ignorado com --reload."
+)
 RemoveOption = typer.Option(
     None,
     "--remove",
@@ -607,6 +610,7 @@ def _render_report(report: EvalReport) -> None:
 def serve(
     host: str = HostOption,
     port: int = PortOption,
+    workers: int = WorkersOption,
     reload: bool = ReloadOption,
     verbose: bool = VerboseOption,
 ) -> None:
@@ -615,10 +619,21 @@ def serve(
 
     import uvicorn
 
-    console.print(f"[green]API em[/] http://{host}:{port}  ·  docs em http://{host}:{port}/docs")
-    # Passed as an import string rather than the object, because --reload needs
-    # to re-import the module in a fresh process.
-    uvicorn.run("rag_agent.api.app:app", host=host, port=port, reload=reload)
+    # One process serialises requests: a question that takes eight seconds
+    # blocks every other question for those eight seconds. Reload needs a
+    # single process to re-import into, so the two are mutually exclusive and
+    # saying so beats silently ignoring one of them.
+    count = 1 if reload else (workers or get_settings().api_workers)
+    if reload and workers:
+        console.print("[yellow]--reload usa um processo só; --workers ignorado.")
+
+    console.print(
+        f"[green]API em[/] http://{host}:{port}  ·  docs em http://{host}:{port}/docs"
+        f"  ·  {count} worker(s)"
+    )
+    # Passed as an import string rather than the object, because both --reload
+    # and --workers re-import the module in fresh processes.
+    uvicorn.run("rag_agent.api.app:app", host=host, port=port, reload=reload, workers=count)
 
 
 def _render_comparison(diff: Comparison, source: Path) -> None:
