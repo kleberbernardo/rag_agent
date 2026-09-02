@@ -46,7 +46,7 @@ so it is edited as source rather than redrawn.
 
 | Layer | Module | Responsibility |
 |---|---|---|
-| Interfaces | `cli.py`, `api/` | Translate in and out. No decisions. |
+| Interfaces | `cli/`, `api/` | Translate in and out. No decisions. |
 | Orchestration | `agent/` | Build the graph, run a turn, measure it. |
 | Capabilities | `tools/` | What the model may call. |
 | Retrieval | `indexing/` | Load, split, embed, search by meaning and by word. |
@@ -1584,7 +1584,10 @@ src/rag_agent/
 ├── config.py          settings, read from the environment and validated at boot
 ├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
 ├── providers.py       LLM and embedding clients, the only place OpenAI appears
-├── cli.py             presentation only, no domain logic
+├── cli/               presentation only, one module per group of commands
+│   ├── options.py         every shared flag, defined once
+│   ├── console.py         the terminal, and the checks before working
+│   └── indexing · asking · evaluating · prompting · serving
 │
 ├── prompts/           the instructions, and where they are read from
 │   ├── __init__.py        fetch from Langfuse, render, fall back to the text
@@ -1616,8 +1619,9 @@ boundary, and the terminal.
 
 A package exists where a thing grows: `indexing/` with every new file format,
 `tools/` with every new tool, `guardrails/` with every new class of thing to
-refuse. `cli.py` is the exception and the acknowledged debt: 742 lines that
-should be a package before another command is added.
+refuse. `cli/` was the last to become one, at 742 lines in a single module,
+which is what a file becomes when every new command is appended to the end
+of the last one.
 
 | To change... | Edit |
 |---|---|
@@ -1628,6 +1632,7 @@ should be a package before another command is added.
 | The model provider | `providers.py` |
 | Token prices | `observability/pricing.py` |
 | Add an endpoint | `api/routes.py` |
+| Add a command | the `cli/` module for its group, and its flags in `cli/options.py` |
 | What is refused | `guardrails/` |
 | The schema | `migrations/`, then `alembic upgrade head` |
 

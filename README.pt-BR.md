@@ -49,7 +49,7 @@ então ele é editado como código-fonte, não redesenhado.
 
 | Camada | Módulo | Responsabilidade |
 |---|---|---|
-| Interfaces | `cli.py`, `api/` | Traduzir entrada e saída. Nenhuma decisão. |
+| Interfaces | `cli/`, `api/` | Traduzir entrada e saída. Nenhuma decisão. |
 | Orquestração | `agent/` | Montar o grafo, rodar um turno, medi-lo. |
 | Capacidades | `tools/` | O que o modelo pode chamar. |
 | Recuperação | `indexing/` | Carregar, quebrar, vetorizar, buscar por significado e por palavra. |
@@ -1593,7 +1593,10 @@ src/rag_agent/
 ├── config.py          configurações, lidas do ambiente e validadas no boot
 ├── types.py           AnswerResult, SearchHit, ToolCall, RunMetrics
 ├── providers.py       clientes de LLM e embedding, o único lugar com OpenAI
-├── cli.py             só apresentação, nenhuma lógica de domínio
+├── cli/               só apresentação, um módulo por grupo de comandos
+│   ├── options.py         toda flag compartilhada, definida uma vez
+│   ├── console.py         o terminal, e as checagens antes de trabalhar
+│   └── indexing · asking · evaluating · prompting · serving
 │
 ├── prompts/           as instruções, e de onde elas são lidas
 │   ├── __init__.py        busca no Langfuse, renderiza, cai para o texto
@@ -1625,8 +1628,9 @@ provedor, e o terminal.
 
 Um pacote existe onde alguma coisa cresce: `indexing/` a cada novo formato de
 arquivo, `tools/` a cada nova ferramenta, `guardrails/` a cada nova classe de
-coisa a recusar. O `cli.py` é a exceção e a dívida reconhecida: 742 linhas que
-deveriam ser um pacote antes de mais um comando entrar.
+coisa a recusar. O `cli/` foi o último a virar um, com 742 linhas num módulo
+só, que é no que um arquivo se transforma quando todo comando novo é
+acrescentado ao fim do anterior.
 
 | Para mudar... | Edite |
 |---|---|
@@ -1637,6 +1641,7 @@ deveriam ser um pacote antes de mais um comando entrar.
 | O provedor do modelo | `providers.py` |
 | Preços de token | `observability/pricing.py` |
 | Acrescentar um endpoint | `api/routes.py` |
+| Acrescentar um comando | o módulo de `cli/` do grupo dele, e as flags em `cli/options.py` |
 | O que é recusado | `guardrails/` |
 | O esquema | `migrations/`, e então `alembic upgrade head` |
 

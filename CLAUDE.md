@@ -91,7 +91,7 @@ rag dataset push      # upload the evaluation dataset to Langfuse
 ## The shape of the thing
 
 ```
-   cli.py  ·  api/          two thin interfaces
+   cli/  ·  api/            two thin interfaces
         └────┬────┘
              ▼
       agent/service.py      knows nothing about terminals or HTTP
@@ -153,7 +153,6 @@ Do not present these as solved:
 
 | Gap | Note |
 |---|---|
-| `cli.py` is 742 lines | Covered at 76% now, but still not split. Split before adding a command |
 | No permission-aware retrieval | Anyone who can ask can retrieve any chunk |
 | No CORS, and the rate limit is per process | See [api.md](.claude/rules/api.md) |
 | `OPENAI_API_KEY` is not a GitHub secret | `evaluation.yml` silently skips |

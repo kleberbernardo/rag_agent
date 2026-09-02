@@ -20,6 +20,30 @@ from rag_agent.indexing import IndexedSource
 
 runner = CliRunner()
 
+
+def patch(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    """Replace a name in every cli submodule that imported it.
+
+    The commands live in one module each and import what they need by name, so
+    a fake has to land wherever the name was bound. Patching by search rather
+    than by path means a command moving between modules does not silently stop
+    being faked.
+    """
+    import sys
+
+    import rag_agent.cli  # noqa: F401  imports every submodule
+
+    replaced = [
+        module
+        for path, module in list(sys.modules.items())
+        if path.startswith("rag_agent.cli") and hasattr(module, name)
+    ]
+    for module in replaced:
+        monkeypatch.setattr(module, name, value)
+
+    assert replaced, f"{name} is not imported by any cli module"
+
+
 INDEXED = [
     IndexedSource(name="resolucao-160.pdf", chunks=416),
     IndexedSource(name="resolucao-35.pdf", chunks=131),
@@ -35,14 +59,14 @@ def indexed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         deleted.append(source)
         return next(entry.chunks for entry in INDEXED if entry.name == source)
 
-    monkeypatch.setattr("rag_agent.cli.list_sources", lambda: list(INDEXED))
-    monkeypatch.setattr("rag_agent.cli.delete_source", delete)
+    patch(monkeypatch, "list_sources", lambda: list(INDEXED))
+    patch(monkeypatch, "delete_source", delete)
     return deleted
 
 
 @pytest.fixture
 def empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("rag_agent.cli.list_sources", list)
+    patch(monkeypatch, "list_sources", list)
 
 
 class TestListing:

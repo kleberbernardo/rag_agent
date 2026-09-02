@@ -18,7 +18,6 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from rag_agent import cli
 from rag_agent.cli import app
 from rag_agent.evaluation import CaseScore
 from rag_agent.indexing import IndexedSource
@@ -27,21 +26,44 @@ from rag_agent.types import AnswerResult, RunMetrics, ToolCall
 runner = CliRunner()
 
 
+def patch(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    """Replace a name in every cli submodule that imported it.
+
+    The commands live in one module each and import what they need by name, so
+    a fake has to land wherever the name was bound. Patching by search rather
+    than by path means a command moving between modules does not silently stop
+    being faked.
+    """
+    import sys
+
+    import rag_agent.cli  # noqa: F401  imports every submodule
+
+    replaced = [
+        module
+        for path, module in list(sys.modules.items())
+        if path.startswith("rag_agent.cli") and hasattr(module, name)
+    ]
+    for module in replaced:
+        monkeypatch.setattr(module, name, value)
+
+    assert replaced, f"{name} is not imported by any cli module"
+
+
 @pytest.fixture(autouse=True)
 def no_logging_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every command configures logging; none of them should write a file here."""
-    monkeypatch.setattr(cli, "setup_logging", lambda **_: None)
-    monkeypatch.setattr(cli, "flush_traces", lambda: None)
+    patch(monkeypatch, "setup_logging", lambda **_: None)
+    patch(monkeypatch, "flush_traces", lambda: None)
 
 
 @pytest.fixture
 def indexed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "count_documents", lambda: 590)
+    patch(monkeypatch, "count_documents", lambda: 590)
 
 
 @pytest.fixture
 def empty_index(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "count_documents", lambda: 0)
+    patch(monkeypatch, "count_documents", lambda: 0)
 
 
 def answer(text: str = "O prazo é de 30 dias. [fonte: r160.pdf]") -> AnswerResult:
@@ -82,7 +104,7 @@ class TestEmptyIndex:
         def unreachable() -> int:
             raise DatabaseUnavailableError("Não foi possível conectar ao Postgres em db:5432.")
 
-        monkeypatch.setattr(cli, "count_documents", unreachable)
+        patch(monkeypatch, "count_documents", unreachable)
 
         result = runner.invoke(app, ["status"])
 
@@ -119,7 +141,7 @@ class TestStatus:
 
 class TestAsk:
     def test_it_prints_the_answer(self, indexed: None, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(cli, "ask", lambda question: answer())
+        patch(monkeypatch, "ask", lambda question: answer())
 
         result = runner.invoke(app, ["ask", "qual o prazo?"])
 
@@ -130,7 +152,7 @@ class TestAsk:
         self, indexed: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Latency, tokens and cost on every answer, without signing up for anything."""
-        monkeypatch.setattr(cli, "ask", lambda question: answer())
+        patch(monkeypatch, "ask", lambda question: answer())
 
         output = runner.invoke(app, ["ask", "qual o prazo?"]).stdout
 
@@ -153,15 +175,15 @@ class TestAsk:
                 estimated_cost_usd=None,
             ),
         )
-        monkeypatch.setattr(cli, "ask", lambda question: unpriced)
+        patch(monkeypatch, "ask", lambda question: unpriced)
 
         assert "US$" not in runner.invoke(app, ["ask", "x"]).stdout
 
     def test_the_trace_is_off_unless_asked_for(
         self, indexed: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(cli, "ask", lambda question: answer())
-        monkeypatch.setattr(cli, "format_trace", lambda messages: "PENSAMENTO INTERNO")
+        patch(monkeypatch, "ask", lambda question: answer())
+        patch(monkeypatch, "format_trace", lambda messages: "PENSAMENTO INTERNO")
 
         assert "PENSAMENTO INTERNO" not in runner.invoke(app, ["ask", "x"]).stdout
         assert "PENSAMENTO INTERNO" in runner.invoke(app, ["ask", "x", "--trace"]).stdout
@@ -177,7 +199,7 @@ class TestChat:
                 asked.append(question)
                 return answer(f"resposta para {question}")
 
-        monkeypatch.setattr(cli, "ChatSession", Session)
+        patch(monkeypatch, "ChatSession", Session)
         return asked
 
     def test_it_remembers_across_turns(self, indexed: None, session: list[str]) -> None:
@@ -214,10 +236,10 @@ class TestIngest:
             seen["indexed"] = len(chunks)
             return len(chunks)
 
-        monkeypatch.setattr(cli, "load_documents", lambda path: ["doc"])
-        monkeypatch.setattr(cli, "split_documents", lambda documents, **_: ["a", "b", "c"])
-        monkeypatch.setattr(cli, "reset_index", reset)
-        monkeypatch.setattr(cli, "index_documents", index)
+        patch(monkeypatch, "load_documents", lambda path: ["doc"])
+        patch(monkeypatch, "split_documents", lambda documents, **_: ["a", "b", "c"])
+        patch(monkeypatch, "reset_index", reset)
+        patch(monkeypatch, "index_documents", index)
         return seen
 
     def test_it_indexes_what_it_split(self, corpus: dict[str, Any]) -> None:
@@ -240,7 +262,7 @@ class TestIngest:
     def test_an_empty_data_folder_fails_and_names_the_path(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(cli, "load_documents", lambda path: [])
+        patch(monkeypatch, "load_documents", lambda path: [])
 
         result = runner.invoke(app, ["ingest"])
 
@@ -250,9 +272,7 @@ class TestIngest:
 
 class TestSources:
     def test_it_lists_what_is_indexed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            cli, "list_sources", lambda: [IndexedSource(name="r160.pdf", chunks=416)]
-        )
+        patch(monkeypatch, "list_sources", lambda: [IndexedSource(name="r160.pdf", chunks=416)])
 
         output = runner.invoke(app, ["sources"]).stdout
 
@@ -260,10 +280,8 @@ class TestSources:
         assert "416" in output
 
     def test_removing_names_the_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            cli, "list_sources", lambda: [IndexedSource(name="r160.pdf", chunks=416)]
-        )
-        monkeypatch.setattr(cli, "delete_source", lambda source: 416)
+        patch(monkeypatch, "list_sources", lambda: [IndexedSource(name="r160.pdf", chunks=416)])
+        patch(monkeypatch, "delete_source", lambda source: 416)
 
         output = runner.invoke(app, ["sources", "--remove", "r160.pdf", "--yes"]).stdout
 
@@ -280,9 +298,9 @@ class TestEval:
         monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
         get_settings.cache_clear()
 
-        monkeypatch.setattr(cli, "load_dataset", lambda path: ["caso"])
-        monkeypatch.setattr(cli, "run_evaluation", lambda cases, **_: iter([_score()]))
-        monkeypatch.setattr(cli, "save_report", lambda report, folder: Path("relatorio.json"))
+        patch(monkeypatch, "load_dataset", lambda path: ["caso"])
+        patch(monkeypatch, "run_evaluation", lambda cases, **_: iter([_score()]))
+        patch(monkeypatch, "save_report", lambda report, folder: Path("relatorio.json"))
 
     def test_it_prints_the_table_and_passes(self, indexed: None, local_run: None) -> None:
         result = runner.invoke(app, ["eval", "--min-score", "0.0"])
@@ -301,8 +319,8 @@ class TestEval:
         self, indexed: None, local_run: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         written: list[Path] = []
-        monkeypatch.setattr(
-            cli, "save_report", lambda report, folder: written.append(folder) or Path("x")
+        patch(
+            monkeypatch, "save_report", lambda report, folder: written.append(folder) or Path("x")
         )
 
         runner.invoke(app, ["eval", "--min-score", "0.0", "--no-save"])
@@ -332,7 +350,7 @@ class TestPrompt:
         assert "Langfuse" in result.stdout
 
     def test_show_reports_where_the_prompt_came_from(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(cli, "describe_source", lambda: ("local", None))
+        patch(monkeypatch, "describe_source", lambda: ("local", None))
 
         output = runner.invoke(app, ["prompt", "show"]).stdout
 

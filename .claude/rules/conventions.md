@@ -40,6 +40,10 @@ whether Langfuse is configured; there is no `--langfuse`.
 **Warning sign:** if explaining a command needs a table comparing it to another
 command, you built one command too many.
 
+A command goes in the `cli/` module for its group, and its flags go in
+`cli/options.py`. Appending it to whichever file is open is how the old
+`cli.py` reached 742 lines.
+
 ### C. Do not invent. Use what the market uses.
 
 **What the owner said:** *"não quero inventar nada"*, *"vamos usar o que o

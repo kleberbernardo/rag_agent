@@ -4,7 +4,7 @@
 
 ```
                     ┌─────────────┐    ┌─────────────┐
-   entry            │  cli.py     │    │  api/       │
+   entry            │  cli/       │    │  api/       │
                     │  Typer      │    │  FastAPI    │
                     └──────┬──────┘    └──────┬──────┘
                            └────────┬─────────┘
@@ -51,7 +51,7 @@ accommodate it, interface logic has probably ended up in the wrong place.
 | `evaluation/` | Dataset, metrics, judge, experiments | [evaluation.md](evaluation.md) |
 | `observability/` | Traces, scores, cost, logging | [observability.md](observability.md) |
 | `api/` | HTTP, sessions, authentication, rate limiting | [api.md](api.md) |
-| `cli.py` | Nine Typer commands | See below |
+| `cli/` | Nine Typer commands, one module per group | See below |
 | `config.py` | Every tunable value, validated at boot | See below |
 | `providers.py` | **Every OpenAI import in the project** | [swapping.md](swapping.md) |
 | `types.py` | Dataclasses shared across layers | |
@@ -70,22 +70,38 @@ call `get_settings.cache_clear()` or the old value survives.
 `isolated_environment` fixture in `tests/conftest.py`. Without that, the
 developer's own environment leaks into the tests.
 
-## cli.py needs splitting
+## cli/ is a package, one module per group of commands
 
-742 lines and nine commands, the largest file in the project by a wide
-margin. It is at 76% coverage now, exercised through Typer's `CliRunner`,
-which runs a terminal command in-process with no subprocess.
+It was a single module of 742 lines, which is what a file becomes when every
+new command is appended to the end of the last one.
 
-Coverage was the urgent half and it is done. The split is not: the agreed plan
-is a `cli/` package with one module per command group.
+| Module | Holds |
+|---|---|
+| `__init__.py` | The Typer application, assembled from the rest |
+| `options.py` | Every shared flag, defined once |
+| `console.py` | The terminal, and the checks a command runs before working |
+| `indexing.py` | `ingest`, `sources`, `status` |
+| `asking.py` | `ask`, `chat` |
+| `evaluating.py` | `eval`, and the tables both its paths print |
+| `prompting.py` | `prompt show`/`push`, `dataset push` |
+| `serving.py` | `serve` |
 
-**Do not add a new command here before splitting it.** It grew from 634 to 742
-while that sentence was already in this file.
+**Commands are registered, not re-declared.** Each module owns a `Typer()`
+holding its own, and `__init__.py` folds them in. A new group is a new module
+and one line.
+
+The largest piece is now `evaluating.py` at 281 lines, and the whole package
+is 921 across eight files.
+
+**A flag lives in `options.py`, not next to the command.** A flag defined
+beside its command is defined again beside the next command that wants it, and
+the two drift. `--verbose` means the same thing everywhere precisely because
+there is one of it.
 
 ## Allowed dependencies between packages
 
 ```
-cli      ──▶ agent, indexing, evaluation, prompts, guardrails, observability
+cli/     ──▶ agent, indexing, evaluation, prompts, guardrails, observability
 api      ──▶ agent, indexing, guardrails, observability
 agent    ──▶ tools, prompts, providers, guardrails, observability
 tools    ──▶ indexing, prompts
